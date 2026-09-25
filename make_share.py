@@ -45,6 +45,7 @@ from typing import Any
 
 from export_review import FIELD_DICT_DF, FIELD_DICT_STEP
 from neware_client import DEVTYPE_NAMES, STEPTYPE_NAMES
+from probe import soh_preview
 
 VERSION = "1.0"
 SHARE_TAG = "batterylab-data"
@@ -145,6 +146,28 @@ def build_readme(recs: list[dict], generated: str) -> str:
     a("**关于设备**：数据由实验室算力盒子上常驻的采集程序从测试机取出并落盘。")
     a("**你没有测试机的访问权限，也不需要** —— 需要设备上的操作时，让人在本机执行，")
     a("把结果给你分析即可。")
+    a("")
+    a("---")
+    a("")
+    a("## ★ 零、省事规则（先读这一节，能省掉不少步骤）")
+    a("")
+    a("下面几条是从**实际运行记录**里总结的 —— 都是踩过的坑，照着做能少走弯路。")
+    a("")
+    a("| # | 规则 | 为什么 |")
+    a("|---|---|---|")
+    a("| 1 | **先读 `datasets.md` 和对应数据集的 `summary.md`** | "
+      "指标已经算好了，自己重算既慢又容易口径不一致 |")
+    a("| 2 | **要跑脚本就先创建 `.py` 文件再执行** | "
+      "`python3 << 'EOF'` 这种 heredoc 写法在这里会失败（实测失败过多次） |")
+    a("| 3 | **不要 `pip install`** | 这台机器**不通外网**，装了必然失败。"
+      "标准库的 `csv` / `math` / `statistics` 足够用 |")
+    a("| 4 | **不要读你自己**（`memory/`、`chats.json`、`MEMORY.md`、agent 工作目录） | "
+      "和电池数据无关，纯浪费步骤 |")
+    a("| 5 | **直接进 `/home/admin/jerry/batterylab-data/`**，不要 `find /` 全盘搜 | "
+      "目录结构固定：`channel=<通道>/testid=<测试号>/` |")
+    a("| 6 | **`detail.csv` 不要整份读进上下文** | 动辄几万行。要么用代码筛，"
+      "要么优先用 `steps.csv`（工步层，几百行） |")
+    a("| 7 | 需要操作设备（启动/停止测试）→ **请人来做** | 你没有测试机权限，也不要尝试 |")
     a("")
     a("---")
     a("")
@@ -365,6 +388,93 @@ def build_index(recs: list[dict], generated: str) -> str:
     return "\n".join(L) + "\n"
 
 
+def with_decay(curve: list[dict]) -> list[dict]:
+    """给逐圈曲线补上「单圈衰减率」：相对首圈容量，这一圈掉了百分之几个点。"""
+    first = (curve[0].get("dis_cap") if curve else 0) or 0
+    out: list[dict] = []
+    prev = None
+    for c in curve:
+        cap = c.get("dis_cap") or 0
+        decay = None if (prev is None or not first) else (prev - cap) / first * 100
+        out.append({"cycle": c.get("cycle"), "dis_cap": cap,
+                    "retention_pct": c.get("retention_pct"), "decay_pct": decay})
+        prev = cap
+    return out
+
+
+def knee_point(rows: list[dict]) -> dict | None:
+    """找「衰减突然加速」的圈 —— 只是**候选**，不是权威判据。
+
+    做法：拿早期衰减率的中位数当基线，从头扫，第一个超过基线 3 倍的圈就是候选。
+    真实的 knee point 有专门算法（如双线性拟合求交点），这里只求"给出一个
+    可解释的位置"，所以报告里明确标注是启发式，别当成定论。
+    """
+    rates = [(r["cycle"], r["decay_pct"]) for r in rows if r.get("decay_pct")]
+    positive = sorted(r for _, r in rates if r > 0)
+    if len(positive) < 4:
+        return None
+    base = positive[len(positive) // 3]
+    if base <= 0:
+        return None
+    for cyc, r in rates:
+        if r > base * 3:
+            return {"cycle": cyc, "rate": r, "ratio": r / base}
+    return None
+
+
+def thin_rows(rows: list[dict], limit: int = 40) -> tuple[list[dict], int]:
+    """行数太多就等间隔抽稀。返回 (抽稀后的行, 步长)，步长 1 表示没抽。"""
+    if len(rows) <= limit:
+        return list(rows), 1
+    k = (len(rows) + limit - 1) // limit
+    picked = [r for i, r in enumerate(rows) if i % k == 0 or i == len(rows) - 1]
+    return picked, k
+
+
+def first_cycle_outlier_ratio(curve: list[dict]) -> float | None:
+    """第 1 圈的放电容量相对后续圈中位数的倍数（不是异常就返回 None）。
+
+    为什么需要：实测发现**第 1 圈常常是化成（预充）循环**，测试条件与后续
+    完全不同 —— 我们在一份真实数据上看到第 1 圈充电 89 分钟、后续只要 13 分钟，
+    容量差 10 倍。这时「末圈 ÷ 首圈」算出的容量保持率会严重偏低
+    （那份数据算出来 17.42%，而曲线从第 2 圈起其实是平的）。
+
+    这种错**从数字上看不出来**，所以必须显式提示，而不是让读者自己去发现。
+    """
+    pts = [c for c in curve if c.get("dis_cap")]
+    if len(pts) < 4:
+        return None
+    later = sorted(c["dis_cap"] for c in pts[1:11])
+    med = later[len(later) // 2]
+    first = pts[0]["dis_cap"]
+    if med <= 0 or first <= 0:
+        return None
+    return first / med if first > 2 * med else None
+
+
+def backfill_curve(ddir: Path) -> list[dict]:
+    """从 `steps.csv` 现场补算逐圈曲线。
+
+    为什么需要：采集服务的早期版本把 `retention_curve` 丢掉了，所以
+    已经落盘的老数据里没有曲线。但**历史测试不会再采一遍**（采集是由
+    状态变化触发的），所以只能在这里补算 —— 否则老数据集永远没有衰减趋势。
+
+    `steps.csv` 只有几百到几千行，读进来算一遍很便宜。
+    """
+    p = ddir / "steps.csv"
+    if not p.exists():
+        return []
+    import csv as _csv
+    try:
+        with p.open("r", encoding="utf-8-sig", newline="") as f:
+            steps = list(_csv.DictReader(f))
+    except (OSError, UnicodeDecodeError):
+        return []
+    if not steps:
+        return []
+    return soh_preview(steps).get("retention_curve") or []
+
+
 # ---------------------------------------------------------------------------
 # summary.md —— 单个数据集
 # ---------------------------------------------------------------------------
@@ -394,25 +504,91 @@ def build_summary(r: dict, data_dir: Path, generated: str) -> str:
     a("> 下面的指标按 `README.md` 里的口径算好。**直接引用，不要重算。**")
     a("")
     if soh.get("available"):
+        # 逐圈曲线先解析出来：上面判断「保持率有没有被化成循环带偏」要用它，
+        # 下面的衰减趋势表也要用。
+        # raw_curve 保留末尾那条 note，full_curve 只留数据点 ——
+        # 别把 note 一起过滤掉，它是"曲线被截断"的唯一提示。
+        raw_curve = soh.get("retention_curve") or []
+        full_curve = [c for c in raw_curve if "cycle" in c]
+        backfilled = False
+        if not full_curve and ddir.is_dir():
+            raw_curve = backfill_curve(ddir)
+            full_curve = [c for c in raw_curve if "cycle" in c]
+            backfilled = bool(full_curve)
+
         rng = soh.get("cycle_range") or ["", ""]
         a("| 指标 | 值 |")
         a("|---|---|")
         a(f"| 循环数 | {soh.get('cycle_count')}（{rng[0]} → {rng[1]}） |")
         a(f"| 首圈放电容量 | {fmt(soh.get('first_discharge_cap_mah'))} mAh |")
         a(f"| 末圈放电容量 | {fmt(soh.get('last_discharge_cap_mah'))} mAh |")
-        a(f"| **容量保持率** | **{soh.get('capacity_retention_pct')} %** |")
+        outlier = first_cycle_outlier_ratio(full_curve)
+        a(f"| **容量保持率** | **{soh.get('capacity_retention_pct')} %**"
+          + (" ⚠️ 见下方说明" if outlier else "") + " |")
         a(f"| 库仑效率（首/末） | {soh.get('coulomb_efficiency_first_pct')} % / "
           f"{soh.get('coulomb_efficiency_last_pct')} % |")
         a(f"| 能量效率（首/末） | {soh.get('energy_efficiency_first_pct')} % / "
           f"{soh.get('energy_efficiency_last_pct')} % |")
         a(f"| DCIR（首/末） | {fmt(soh.get('dcir_first_mohm'))} / "
           f"{fmt(soh.get('dcir_last_mohm'))} mΩ |")
+        growth = soh.get("dcir_growth_pct")
+        if growth is not None:
+            a(f"| DCIR 增长率 | **+{growth:.1f} %**（相对首圈） |")
         a("")
         a("**指标定义**：")
         a("- 容量保持率 = 末圈放电容量 ÷ 首圈放电容量")
         a("- 库仑效率 = 同圈放电容量 ÷ 充电容量")
         a("- 能量效率 = 同圈放电能量 ÷ 充电能量")
         a("- DCIR = 工步切换点的 |ΔV| ÷ |ΔI|（mΩ）")
+        if outlier:
+            a("")
+            a(f"> ⚠️ **上表的容量保持率要打个问号。**")
+            a(f"> 第 1 圈的放电容量是后续圈中位数的 **{outlier:.1f} 倍**，"
+              "这通常意味着**第 1 圈是化成（预充）循环**、测试条件与后续不同。")
+            a("> 而「容量保持率 = 末圈 ÷ 首圈」是**拿第 1 圈当基准**算的 —— "
+              "基准偏大，算出来的保持率就会**明显偏低**。")
+            a("> **不要直接把它当 SOH 用。** 请先确认第 1 圈是不是化成循环；"
+              "如果是，应改用第一个正常循环作基准，或直接看下面的逐圈曲线形状。")
+        a("")
+        a("### 逐圈容量衰减（判断衰减趋势和「跳水」的依据）")
+        a("")
+        if full_curve:
+            if backfilled:
+                a("> 注：本数据集是早期采集的、没保留逐圈曲线，"
+                  "下表是从 `steps.csv` 现场补算的。")
+                a("")
+            rows = with_decay(full_curve)
+            shown, stride = thin_rows(rows)
+            a("| 循环 | 放电容量 (mAh) | 容量保持率 (%) | 单圈衰减率 (%) |")
+            a("|---|---|---|---|")
+            # 注意：这里用 row 而不是 r —— r 是本函数的入参（manifest 记录），
+            # 覆盖掉它会让下面「数据文件」那节读不到 step_count/detail_count。
+            for row in shown:
+                d = row["decay_pct"]
+                # round(d, 3) + 0.0：把 -0.000 归一成 0.000。
+                # 容量小幅回升时衰减率是个极小的负数，直接格式化会印出 "-0.000"，
+                # 在报告里看着像 bug。
+                dtxt = "—" if d is None else f"{round(d, 3) + 0.0:.3f}"
+                a(f"| {row['cycle']} | {fmt(row['dis_cap'], 3)} | "
+                  f"{fmt(row['retention_pct'], 3)} | {dtxt} |")
+            if stride > 1:
+                a("")
+                a(f"> 共 {len(rows)} 圈，上表每 {stride} 圈抽 1 行（首尾必列）。")
+            knee = knee_point(rows)
+            if knee:
+                a("")
+                a(f"> **衰减加速点（启发式）**：第 **{knee['cycle']}** 圈，"
+                  f"单圈衰减率 {knee['rate']:.3f}%，"
+                  f"约为早期基线的 **{knee['ratio']:.1f} 倍**。")
+                a("> 这是按「单圈衰减率突然放大」筛出来的**候选点**，"
+                  "不是唯一判据；要严谨结论请结合容量-圈数曲线的拐点分析。")
+            tail = next((c.get("note") for c in raw_curve if "note" in c), None)
+            if tail:
+                a("")
+                a(f"> {tail}")
+        else:
+            a("> 本数据集既没有保存的逐圈曲线，也补算不出来"
+              "（`steps.csv` 缺失，或里面没有有效的放电工步）。")
     else:
         a(f"⚠️ 算不出：{soh.get('reason', '未知原因')}")
     a("")

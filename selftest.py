@@ -30,6 +30,7 @@ from probe import (
     check_time_unit,
     soh_preview,
 )
+from probe import _sig
 
 
 def resp(xml: str) -> Response:
@@ -411,6 +412,37 @@ def test_soh(c: Checker) -> None:
     c.eq(soh["dcir_last_mohm"], 120.0, "末圈 DCIR")
     c.eq(soh["dcir_growth_pct"], 120.0, "DCIR 增长")
     c.eq(len(soh["retention_curve"]), 3, "容量保持率曲线点数")
+    c.ok(all("cycle" in p for p in soh["retention_curve"]),
+         "曲线点数没超过上限时，不带截断提示的 note")
+
+    # 曲线超长时要截断到 CURVE_CAP，并且**必须**在 note 里说清截断到多少 ——
+    # 否则读的人会以为下面是完整曲线（旧版就是这么误导的）。
+    from probe import CURVE_CAP
+    many = [{"cycleid": str(i), "steptype": "dc", "cap": str(0.2 - 0.0001 * i),
+             "eng": "0.7", "dcir": str(100 + i)} for i in range(1, CURVE_CAP + 61)]
+    many_soh = soh_preview(many)
+    c.eq(len(many_soh["retention_curve"]), CURVE_CAP + 1,
+         f"超长曲线截断到 {CURVE_CAP} 点 + 1 条 note")
+    note = many_soh["retention_curve"][-1].get("note", "")
+    c.ok("仅列前" in note and str(CURVE_CAP) in note,
+         "截断时的 note 说清了「只列前多少圈」", note)
+
+    print("\n[5b] ★ 小容量不能被取整抹掉（真实数据上踩过）")
+    # 原来用 round(v, 6)：4.89e-07 → 0，5.05e-07 → 1e-06。既丢数据又歪曲数值，
+    # 而且从结果上看不出来 —— 一份真实数据的逐圈放电容量整列被抹成了 0。
+    c.eq(_sig(4.89e-07), 4.89e-07, "4.89e-07 不被抹成 0")
+    c.eq(_sig(5.05e-07), 5.05e-07, "5.05e-07 不被放大成 1e-06")
+    c.eq(_sig(0.000947), 0.000947, "常规量级（mAh 级）不受影响")
+    c.eq(_sig(0.0), 0.0, "0 仍然是 0")
+    c.eq(_sig(None), None, "非数字原样返回，不抛异常")
+    tiny = [{"cycleid": str(i), "steptype": "dc", "cap": str(5.0e-07 - i * 1e-9),
+             "eng": "1e-07", "dcir": "100"} for i in range(1, 6)]
+    tiny_soh = soh_preview(tiny)
+    c.ok(tiny_soh["first_discharge_cap_mah"] != 0,
+         "1e-07 量级的容量不会被算成 0",
+         str(tiny_soh["first_discharge_cap_mah"]))
+    c.ok(all(p["dis_cap"] != 0 for p in tiny_soh["retention_curve"]),
+         "逐圈曲线里的小容量也都保住了")
 
     doc = NewareClient.parse_data(resp(STEPLAYER_DOC_RESP))
     doc_soh = soh_preview(doc)

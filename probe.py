@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 import traceback
 import unicodedata
@@ -219,6 +220,31 @@ def aux_columns(rows: list[dict[str, Any]]) -> list[str]:
 # SOH 预览（完全基于工步层数据）
 # --------------------------------------------------------------------------
 
+# 逐圈曲线在 manifest 里保留多少圈。
+# 定 300 是因为：容量跳水点经常出现在第 100 圈之后，只留 20 圈看不出趋势；
+# 而 300 圈 × 每条几十字节，也不会把 manifest 撑到读不动。
+CURVE_CAP = 300
+
+
+def _sig(v: float, digits: int = 6) -> float:
+    """按**有效数字**取整，而不是按小数位数。
+
+    为什么不能用 `round(v, 6)`：容量可能是 1e-7 这种量级，
+    `round` 到小数点后 6 位会把 4.89e-07 变成 **0**、把 5.05e-07 变成 **1e-06**
+    —— 既丢数据又歪曲数值（最多差一倍），而且**从数字上看不出来**
+    （实测在一份真实数据上，逐圈放电容量整列都被抹成 0）。
+
+    按有效数字取整则与量级无关，不会出这种问题。
+    """
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return v
+    if x == 0 or not math.isfinite(x):
+        return x
+    return round(x, digits - 1 - math.floor(math.log10(abs(x))))
+
+
 def soh_preview(steps: list[dict[str, Any]]) -> dict[str, Any]:
     """用工步层数据算 SOH 关键指标。
 
@@ -267,7 +293,7 @@ def soh_preview(steps: list[dict[str, Any]]) -> dict[str, Any]:
         return round(c["dis_eng"] / c["charge_eng"] * 100, 2) if c["charge_eng"] else None
 
     retention_curve = [
-        {"cycle": c, "dis_cap": round(usable[c]["dis_cap"], 6),
+        {"cycle": c, "dis_cap": _sig(usable[c]["dis_cap"]),
          "retention_pct": round(usable[c]["dis_cap"] / first_cap * 100, 3)}
         for c in order
     ]
@@ -276,8 +302,8 @@ def soh_preview(steps: list[dict[str, Any]]) -> dict[str, Any]:
         "available": True,
         "cycle_count": len(order),
         "cycle_range": [first, last],
-        "first_discharge_cap_mah": round(first_cap, 6),
-        "last_discharge_cap_mah": round(last_cap, 6),
+        "first_discharge_cap_mah": _sig(first_cap),
+        "last_discharge_cap_mah": _sig(last_cap),
         "capacity_retention_pct": round(last_cap / first_cap * 100, 2),
         "coulomb_efficiency_first_pct": _ce(first),
         "coulomb_efficiency_last_pct": _ce(last),
@@ -289,8 +315,11 @@ def soh_preview(steps: list[dict[str, Any]]) -> dict[str, Any]:
             round(dcir_by_cycle[last] / dcir_by_cycle[first] * 100, 2)
             if dcir_by_cycle.get(first) and dcir_by_cycle.get(last) else None
         ),
-        "retention_curve": retention_curve[:20] + (
-            [{"note": f"...共 {len(retention_curve)} 圈，完整曲线见 JSON"}] if len(retention_curve) > 20 else []
+        # 曲线截断到 CURVE_CAP 圈。note 里必须说清"截断到多少"，
+        # 否则读的人会以为下面就是完整曲线（旧版就是这样误导的）。
+        "retention_curve": retention_curve[:CURVE_CAP] + (
+            [{"note": f"…曲线仅列前 {CURVE_CAP} 圈，实际共 {len(retention_curve)} 圈"}]
+            if len(retention_curve) > CURVE_CAP else []
         ),
     }
 

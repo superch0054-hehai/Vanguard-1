@@ -415,7 +415,9 @@ class Collector:
             "detail_count": len(detail),
             "dir": str(ddir),
             "parser_version": f"collector {VERSION}",
-            "soh": {k: v for k, v in soh.items() if k != "retention_curve"},
+            # retention_curve（逐圈容量+保持率）保留：SOH 报告的衰减趋势分析要用它，
+            # 丢掉就只能回头从 steps.csv 重算。曲线在 soh_preview 里已截断为前 20 圈。
+            "soh": soh,
         }
         self.manifest.append(record)
         self.collected.add(key)

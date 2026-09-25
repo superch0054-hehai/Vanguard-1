@@ -6,6 +6,7 @@ raw_dumps/*.bin
 
 # 生成产物（可重算）
 probe_report.json
+_cli_test_report.json
 审查包_*/
 对账表_*.csv
 对账说明_*.md

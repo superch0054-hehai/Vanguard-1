@@ -189,6 +189,8 @@ def main() -> int:
         c.ok(r["step_count"] == 5, f"工步数正确（{r['step_count']}）")
         c.ok(r["detail_count"] == 30, f"明细行数正确（{r['detail_count']}）")
         c.ok(r["soh"].get("available") is True, "算了 SOH 指标")
+        c.ok("retention_curve" in r["soh"],
+             "逐圈衰减曲线保留在 manifest 里（SOH 报告的趋势分析要用它）")
         c.ok("collected_at" in r and "parser_version" in r, "元数据字段齐全")
 
     hb = json.loads(col.status_path.read_text(encoding="utf-8"))
