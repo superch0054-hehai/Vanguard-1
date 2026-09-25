@@ -1,0 +1,5 @@
+# 核心脚本零依赖（仅标准库）
+# 以下为可选，缺失时自动降级
+pandas          # Parquet 导出 / 数据分析
+pyarrow         # Parquet 支持
+matplotlib      # export_review.py 的曲线图

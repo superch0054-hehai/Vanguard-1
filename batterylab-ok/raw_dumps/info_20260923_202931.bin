@@ -1,0 +1,583 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bts version="1.0">
+  <cmd>getdevinfo_resp</cmd>
+  <client version="BTS Client 2025.11.24(R3) (64)" />
+  <serverip count="1">
+    <server ip="127.0.0.1" port="3306" version="8.0.4.546 (2025.11.24)" devCount="6">
+      <dev ip="192.168.1.4" devid="4" zwjVersion="4S_8.0.19.0_20250605_115929_00" zwjGuid="7070CC99795E4F279BFE7C7FD5D4F97A" xwjCount="10">
+        <xwj id="1" xwjVersion="M04310702_250725_101208_FD4F6" xwjGuid="6BD152DBAE2A11F08DE298541B2934C9" />
+        <xwj id="2" xwjVersion="M04310702_250725_101208_FD4F6" xwjGuid="BB8C1330AE2811F08A3A98541B2934C9" />
+        <xwj id="3" xwjVersion="M04310702_250725_101208_FD4F6" xwjGuid="70FAC546AE2911F0988A98541B2934C9" />
+        <xwj id="4" xwjVersion="M04310702_250725_101208_FD4F6" xwjGuid="801184B8AE2911F0A58998541B2934C9" />
+        <xwj id="5" xwjVersion="M04310700_250417_135925_FD4F6" xwjGuid="F0C25EF2A5A311F080A998541B2934C9" />
+        <xwj id="6" xwjVersion="M04310700_250417_135925_FD4F6" xwjGuid="DD0DE2EEA5B611F0B1ED98541B2934C9" />
+        <xwj id="7" xwjVersion="M04310700_250417_135925_FD4F6" xwjGuid="910BDE26A5A411F0812098541B2934C9" />
+        <xwj id="8" xwjVersion="M04310700_250417_135925_FD4F6" xwjGuid="502DC2C8A5A311F0A67498541B2934C9" />
+        <xwj id="9" xwjVersion="M04310702_250725_101208_FD4F6" xwjGuid="1BC67760AE2711F095DB98541B2934C9" />
+        <xwj id="10" xwjVersion="M04310702_250725_101208_FD4F6" xwjGuid="65BEBB6DAE2A11F080BF98541B2934C9" />
+      </dev>
+      <dev ip="192.168.1.5" devid="5" zwjVersion="4S_8.0.19.0_20250605_115929_00" zwjGuid="48043C542F174DE4B136A5E42B1E6DCA" xwjCount="10">
+        <xwj id="1" xwjVersion="M04310702_250725_101208_FD4F6" xwjGuid="21D281DEAE2711F0B13298541B2934C9" />
+        <xwj id="2" xwjVersion="M04310700_250417_135925_FD4F6" xwjGuid="1D0665C5A59B11F0B78E98541B2934C9" />
+        <xwj id="3" xwjVersion="M04310702_250725_101208_FD4F6" xwjGuid="C5D068CAAE2611F0815E98541B2934C9" />
+        <xwj id="4" xwjVersion="M04310702_250725_101208_FD4F6" xwjGuid="D9AA8E31AE2611F08BC298541B2934C9" />
+        <xwj id="5" xwjVersion="M04310702_250725_101208_FD4F6" xwjGuid="0ED37AF4AE2711F08CAC98541B2934C9" />
+        <xwj id="6" xwjVersion="M04310702_250725_101208_FD4F6" xwjGuid="289BF9BDAE2711F092C398541B2934C9" />
+        <xwj id="7" xwjVersion="M04310702_250725_101208_FD4F6" xwjGuid="7C0AC243AE2811F0A91798541B2934C9" />
+        <xwj id="8" xwjVersion="M04310702_250725_101208_FD4F6" xwjGuid="CC6C1B5DAE2611F089FC98541B2934C9" />
+        <xwj id="9" xwjVersion="M04310702_250725_101208_FD4F6" xwjGuid="D32A1626AE2611F0B80A98541B2934C9" />
+        <xwj id="10" xwjVersion="M04310702_250725_101208_FD4F6" xwjGuid="3431658EAE2711F0B53298541B2934C9" />
+      </dev>
+      <dev ip="192.168.1.170" devid="170" zwjVersion="4S_8.0.26.0_20250923_112830_00" zwjGuid="F97E8390EB074D6A88FAA8890F6FBADF" xwjCount="11">
+        <xwj id="1" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="FBC59D97B87D11F0B4DE98541B2934C9" />
+        <xwj id="2" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="8170739DB87E11F0B3E898541B2934C9" />
+        <xwj id="3" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="4D45786DB88411F0865D98541B2934C9" />
+        <xwj id="4" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="A7FC692FB88311F083BE98541B2934C9" />
+        <xwj id="5" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="97DE91B6B96F11F097B098541B2934C9" />
+        <xwj id="6" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="24E4C61EB96C11F0913998541B2934C9" />
+        <xwj id="7" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="2DB3189BB97211F096A298541B2934C9" />
+        <xwj id="8" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="50ADDB5BE57211F0945898541B2934C9" />
+        <xwj id="9" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="0A0F3CABB91711F0BF2B98541B2934C9" />
+        <xwj id="10" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="251D3DDDB91F11F0A9AC98541B2934C9" />
+        <xwj id="75" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="FBC59D97B87D11F0B4DE98541B2934C9" />
+      </dev>
+      <dev ip="192.168.1.171" devid="171" zwjVersion="4S_8.0.26.0_20250923_112830_00" zwjGuid="C6498BFA08CA4DEEB519846527E3E467" xwjCount="11">
+        <xwj id="1" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="1A6AD3EEB91711F0983798541B2934C9" />
+        <xwj id="2" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="128C9040B91711F0B2BE98541B2934C9" />
+        <xwj id="3" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="4075C275B91711F0BDA798541B2934C9" />
+        <xwj id="4" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="2BA5C0DCB91F11F0A04998541B2934C9" />
+        <xwj id="5" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="54E0CE52B91711F0ABA598541B2934C9" />
+        <xwj id="6" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="2191F197B91511F0BB1698541B2934C9" />
+        <xwj id="7" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="CC4FB655B92111F0845898541B2934C9" />
+        <xwj id="8" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="CE36DE21B84E11F0A7A498541B2934C9" />
+        <xwj id="9" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="814FDE13B84D11F0814198541B2934C9" />
+        <xwj id="10" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="42849EE7B84E11F0AB2198541B2934C9" />
+        <xwj id="15" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="1A6AD3EEB91711F0983798541B2934C9" />
+      </dev>
+      <dev ip="192.168.1.187" devid="187" zwjVersion="4S_8.0.26.0_20250923_112830_00" zwjGuid="53E4469F56A24D46B317987E07496BBB" xwjCount="10">
+        <xwj id="1" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="90F84D8DEB7911F0979698541B2934C9" />
+        <xwj id="2" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="9E3CA43DEB7911F0BF3298541B2934C9" />
+        <xwj id="3" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="F59D95D5EB7A11F0837D98541B2934C9" />
+        <xwj id="4" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="83FF8F9EEB7911F0BEAA98541B2934C9" />
+        <xwj id="5" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="C760A8C4EC3311F0AC0298541B2934C9" />
+        <xwj id="6" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="FF261579EC3311F095AA98541B2934C9" />
+        <xwj id="7" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="AAAD8780EC3411F088AE98541B2934C9" />
+        <xwj id="8" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="0AC72CF7EC3411F0843198541B2934C9" />
+        <xwj id="9" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="CBDBA757EC2B11F084D398541B2934C9" />
+        <xwj id="10" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="B554FE01EC2C11F0AEE698541B2934C9" />
+      </dev>
+      <dev ip="192.168.1.188" devid="188" zwjVersion="4S_8.0.26.0_20250923_112830_00" zwjGuid="9BEFEFB8CF81421491352538A633B0A9" xwjCount="10">
+        <xwj id="1" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="CF31A4DDEC2C11F0900598541B2934C9" />
+        <xwj id="2" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="C5680384EC3011F086B998541B2934C9" />
+        <xwj id="3" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="D7A50B6EEA9911F0A97698541B2934C9" />
+        <xwj id="4" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="F342477DEA9611F082C898541B2934C9" />
+        <xwj id="5" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="9D07CD39EA9A11F0AB7898541B2934C9" />
+        <xwj id="6" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="8385695EEA9A11F0A93D98541B2934C9" />
+        <xwj id="7" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="BDF9FD2EEC3011F08DF898541B2934C9" />
+        <xwj id="8" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="5EA1458CEC3011F0942C98541B2934C9" />
+        <xwj id="9" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="961A0362EC3011F09B5D98541B2934C9" />
+        <xwj id="10" xwjVersion="M04310702_250725_101208_FD4A6" xwjGuid="7A038CA8EC3011F095AE98541B2934C9" />
+      </dev>
+    </server>
+  </serverip>
+  <middle count="496">
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="1" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="1" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="1" Channelid="3">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="1" Channelid="4">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="1" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="1" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="1" Channelid="7">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="1" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="2" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="2" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="2" Channelid="3">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="2" Channelid="4">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="2" Channelid="5">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="2" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="2" Channelid="7">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="2" Channelid="8">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="3" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="3" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="3" Channelid="3">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="3" Channelid="4">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="3" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="3" Channelid="6">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="3" Channelid="7">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="3" Channelid="8">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="4" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="4" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="4" Channelid="3">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="4" Channelid="4">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="4" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="4" Channelid="6">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="4" Channelid="7">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="4" Channelid="8">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="5" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="5" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="5" Channelid="3">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="5" Channelid="4">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="5" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="5" Channelid="6">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="5" Channelid="7">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="5" Channelid="8">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="6" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="6" Channelid="2">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="6" Channelid="3">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="6" Channelid="4">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="6" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="6" Channelid="6">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="6" Channelid="7">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="6" Channelid="8">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="7" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="7" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="7" Channelid="3">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="7" Channelid="4">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="7" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="7" Channelid="6">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="7" Channelid="7">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="7" Channelid="8">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="8" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="8" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="8" Channelid="3">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="8" Channelid="4">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="8" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="8" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="8" Channelid="7">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="8" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="9" Channelid="1">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="9" Channelid="2">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="9" Channelid="3">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="9" Channelid="4">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="9" Channelid="5">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="9" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="9" Channelid="7">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="9" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="10" Channelid="1">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="10" Channelid="2">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="10" Channelid="3">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="10" Channelid="4">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="10" Channelid="5">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="10" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="10" Channelid="7">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="4" subdevid="10" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="1" Channelid="1">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="1" Channelid="2">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="1" Channelid="3">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="1" Channelid="4">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="1" Channelid="5">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="1" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="1" Channelid="7">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="1" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="2" Channelid="1">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="2" Channelid="2">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="2" Channelid="3">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="2" Channelid="4">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="2" Channelid="5">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="2" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="2" Channelid="7">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="2" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="3" Channelid="1">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="3" Channelid="2">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="3" Channelid="3">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="3" Channelid="4">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="3" Channelid="5">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="3" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="3" Channelid="7">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="3" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="4" Channelid="1">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="4" Channelid="2">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="4" Channelid="3">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="4" Channelid="4">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="4" Channelid="5">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="4" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="4" Channelid="7">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="4" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="5" Channelid="1">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="5" Channelid="2">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="5" Channelid="3">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="5" Channelid="4">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="5" Channelid="5">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="5" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="5" Channelid="7">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="5" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="6" Channelid="1">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="6" Channelid="2">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="6" Channelid="3">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="6" Channelid="4">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="6" Channelid="5">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="6" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="6" Channelid="7">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="6" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="7" Channelid="1">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="7" Channelid="2">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="7" Channelid="3">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="7" Channelid="4">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="7" Channelid="5">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="7" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="7" Channelid="7">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="7" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="8" Channelid="1">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="8" Channelid="2">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="8" Channelid="3">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="8" Channelid="4">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="8" Channelid="5">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="8" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="8" Channelid="7">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="8" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="9" Channelid="1">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="9" Channelid="2">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="9" Channelid="3">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="9" Channelid="4">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="9" Channelid="5">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="9" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="9" Channelid="7">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="9" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="10" Channelid="1">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="10" Channelid="2">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="10" Channelid="3">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="10" Channelid="4">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="10" Channelid="5">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="10" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="10" Channelid="7">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="5" subdevid="10" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="1" Channelid="1">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="1" Channelid="2">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="1" Channelid="3">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="1" Channelid="4">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="1" Channelid="5">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="1" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="1" Channelid="7">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="1" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="2" Channelid="1">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="2" Channelid="2">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="2" Channelid="3">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="2" Channelid="4">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="2" Channelid="5">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="2" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="2" Channelid="7">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="2" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="3" Channelid="1">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="3" Channelid="2">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="3" Channelid="3">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="3" Channelid="4">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="3" Channelid="5">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="3" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="3" Channelid="7">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="3" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="4" Channelid="1">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="4" Channelid="2">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="4" Channelid="3">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="4" Channelid="4">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="4" Channelid="5">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="4" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="4" Channelid="7">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="4" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="5" Channelid="1">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="5" Channelid="2">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="5" Channelid="3">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="5" Channelid="4">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="5" Channelid="5">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="5" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="5" Channelid="7">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="5" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="6" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="6" Channelid="2">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="6" Channelid="3">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="6" Channelid="4">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="6" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="6" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="6" Channelid="7">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="6" Channelid="8">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="7" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="7" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="7" Channelid="3">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="7" Channelid="4">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="7" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="7" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="7" Channelid="7">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="7" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="8" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="8" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="8" Channelid="3">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="8" Channelid="4">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="8" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="8" Channelid="6">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="8" Channelid="7">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="8" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="9" Channelid="1">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="9" Channelid="2">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="9" Channelid="3">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="9" Channelid="4">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="9" Channelid="5">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="9" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="9" Channelid="7">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="9" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="10" Channelid="1">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="10" Channelid="2">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="10" Channelid="3">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="10" Channelid="4">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="10" Channelid="5">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="10" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="10" Channelid="7">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="10" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="75" Channelid="1">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="75" Channelid="2">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="75" Channelid="3">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="75" Channelid="4">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="75" Channelid="5">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="75" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="75" Channelid="7">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="170" subdevid="75" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="1" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="1" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="1" Channelid="3">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="1" Channelid="4">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="1" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="1" Channelid="6">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="1" Channelid="7">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="1" Channelid="8">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="2" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="2" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="2" Channelid="3">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="2" Channelid="4">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="2" Channelid="5">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="2" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="2" Channelid="7">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="2" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="3" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="3" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="3" Channelid="3">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="3" Channelid="4">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="3" Channelid="5">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="3" Channelid="6">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="3" Channelid="7">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="3" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="4" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="4" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="4" Channelid="3">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="4" Channelid="4">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="4" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="4" Channelid="6">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="4" Channelid="7">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="4" Channelid="8">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="5" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="5" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="5" Channelid="3">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="5" Channelid="4">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="5" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="5" Channelid="6">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="5" Channelid="7">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="5" Channelid="8">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="6" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="6" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="6" Channelid="3">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="6" Channelid="4">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="6" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="6" Channelid="6">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="6" Channelid="7">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="6" Channelid="8">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="7" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="7" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="7" Channelid="3">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="7" Channelid="4">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="7" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="7" Channelid="6">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="7" Channelid="7">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="7" Channelid="8">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="8" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="8" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="8" Channelid="3">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="8" Channelid="4">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="8" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="8" Channelid="6">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="8" Channelid="7">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="8" Channelid="8">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="9" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="9" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="9" Channelid="3">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="9" Channelid="4">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="9" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="9" Channelid="6">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="9" Channelid="7">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="9" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="10" Channelid="1">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="10" Channelid="2">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="10" Channelid="3">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="10" Channelid="4">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="10" Channelid="5">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="10" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="10" Channelid="7">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="10" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="15" Channelid="1">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="15" Channelid="2">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="15" Channelid="3">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="15" Channelid="4">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="15" Channelid="5">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="15" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="15" Channelid="7">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="171" subdevid="15" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="1" Channelid="1">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="1" Channelid="2">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="1" Channelid="3">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="1" Channelid="4">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="1" Channelid="5">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="1" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="1" Channelid="7">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="1" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="2" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="2" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="2" Channelid="3">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="2" Channelid="4">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="2" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="2" Channelid="6">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="2" Channelid="7">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="2" Channelid="8">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="3" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="3" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="3" Channelid="3">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="3" Channelid="4">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="3" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="3" Channelid="6">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="3" Channelid="7">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="3" Channelid="8">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="4" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="4" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="4" Channelid="3">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="4" Channelid="4">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="4" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="4" Channelid="6">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="4" Channelid="7">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="4" Channelid="8">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="5" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="5" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="5" Channelid="3">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="5" Channelid="4">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="5" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="5" Channelid="6">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="5" Channelid="7">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="5" Channelid="8">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="6" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="6" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="6" Channelid="3">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="6" Channelid="4">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="6" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="6" Channelid="6">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="6" Channelid="7">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="6" Channelid="8">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="7" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="7" Channelid="2">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="7" Channelid="3">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="7" Channelid="4">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="7" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="7" Channelid="6">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="7" Channelid="7">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="7" Channelid="8">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="8" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="8" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="8" Channelid="3">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="8" Channelid="4">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="8" Channelid="5">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="8" Channelid="6">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="8" Channelid="7">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="8" Channelid="8">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="9" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="9" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="9" Channelid="3">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="9" Channelid="4">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="9" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="9" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="9" Channelid="7">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="9" Channelid="8">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="10" Channelid="1">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="10" Channelid="2">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="10" Channelid="3">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="10" Channelid="4">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="10" Channelid="5">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="10" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="10" Channelid="7">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="187" subdevid="10" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="1" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="1" Channelid="2">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="1" Channelid="3">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="1" Channelid="4">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="1" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="1" Channelid="6">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="1" Channelid="7">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="1" Channelid="8">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="2" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="2" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="2" Channelid="3">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="2" Channelid="4">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="2" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="2" Channelid="6">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="2" Channelid="7">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="2" Channelid="8">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="3" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="3" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="3" Channelid="3">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="3" Channelid="4">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="3" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="3" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="3" Channelid="7">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="3" Channelid="8">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="4" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="4" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="4" Channelid="3">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="4" Channelid="4">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="4" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="4" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="4" Channelid="7">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="4" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="5" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="5" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="5" Channelid="3">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="5" Channelid="4">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="5" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="5" Channelid="6">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="5" Channelid="7">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="5" Channelid="8">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="6" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="6" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="6" Channelid="3">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="6" Channelid="4">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="6" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="6" Channelid="6">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="6" Channelid="7">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="6" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="7" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="7" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="7" Channelid="3">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="7" Channelid="4">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="7" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="7" Channelid="6">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="7" Channelid="7">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="7" Channelid="8">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="8" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="8" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="8" Channelid="3">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="8" Channelid="4">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="8" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="8" Channelid="6">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="8" Channelid="7">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="8" Channelid="8">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="9" Channelid="1">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="9" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="9" Channelid="3">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="9" Channelid="4">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="9" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="9" Channelid="6">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="9" Channelid="7">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="9" Channelid="8">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="10" Channelid="1">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="10" Channelid="2">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="10" Channelid="3">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="10" Channelid="4">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="10" Channelid="5">false</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="10" Channelid="6">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="10" Channelid="7">true</channel>
+    <channel ip="127.0.0.1" devtype="27" devid="188" subdevid="10" Channelid="8">true</channel>
+  </middle>
+</bts>
+
+#
