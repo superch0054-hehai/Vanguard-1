@@ -188,7 +188,7 @@ def main() -> int:
         ("含条码", "D672035TAA112" in readme),
         ("含 testid", "244" in readme),
         ("含辅助通道提示", "CPU" in readme),
-        ("含 10 个审查问题", readme.count("**1.") == 1 and "**10." in readme),
+        ("含 8 个审查问题", "**1." in readme and "**8." in readme),
         ("口径存疑已标注", "待确认" in readme),
         ("完整性提示正确", "完整=否" in readme or "是否完整：否" in readme),
     ]

@@ -15,6 +15,11 @@
 | `probe.py` | 一键体检：8 个环节逐项验证 + 时间单位校验 + **SOH 数据可行性预览** |
 | `selftest.py` | 离线自测，94 项断言。验证命令拼装、解析、分页、SOH 计算，**不需要真机** |
 | `export_review.py` | **导出专家审查包**：数据 CSV + 字段字典 + 待审查问题 + 4 张曲线图 |
+| `collector.py` | **★ 采集服务**：自动发现测试结束 → 抓条码 → 拉数据 → 落盘 → 记元数据 |
+| `selftest_collector.py` | `collector.py` 的离线端到端测试（23 项），**不需要真机** |
+| `make_share.py` | **导出给 AI 助手读的共享目录**：口径规则 + 索引 + 摘要 |
+| `selftest_make_share.py` | `make_share.py` 的离线测试（40 项），**不需要真机** |
+| `service.sh` | 采集服务的启停脚本（start/stop/status/ensure/log） |
 | `selftest_export.py` | `export_review.py` 的离线端到端测试，**不需要真机** |
 | `dump_raw.py` | 原始字节诊断。解析失败时用它看清客户端到底发了什么 |
 | `CHECKLIST.md` | 准备清单、现场信息采集表、验证路径、故障速查、时间倒排 |

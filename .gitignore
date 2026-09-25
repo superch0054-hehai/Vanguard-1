@@ -1,5 +1,25 @@
+# 数据与日志（绝不提交）
+data/
+logs/
+raw_dumps/*.bin
+*.pid
+
+# 生成产物（可重算）
+probe_report.json
+审查包_*/
+对账表_*.csv
+对账说明_*.md
+_*_out/
+_*_test*/
+
+# 环境与缓存
 .venv/
 venv/
 __pycache__/
-*.pyc
+*.py[cod]
 .env
+
+# 编辑器
+.vscode/
+.idea/
+.DS_Store

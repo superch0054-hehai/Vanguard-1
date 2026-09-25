@@ -276,8 +276,8 @@ def soh_preview(steps: list[dict[str, Any]]) -> dict[str, Any]:
         "available": True,
         "cycle_count": len(order),
         "cycle_range": [first, last],
-        "first_discharge_cap_ah": round(first_cap, 6),
-        "last_discharge_cap_ah": round(last_cap, 6),
+        "first_discharge_cap_mah": round(first_cap, 6),
+        "last_discharge_cap_mah": round(last_cap, 6),
         "capacity_retention_pct": round(last_cap / first_cap * 100, 2),
         "coulomb_efficiency_first_pct": _ce(first),
         "coulomb_efficiency_last_pct": _ce(last),
@@ -301,8 +301,8 @@ def print_soh(soh: dict[str, Any]) -> None:
         print(f"  不可用：{soh.get('reason')}")
         return
     print(f"  循环数              {soh['cycle_count']}（{soh['cycle_range'][0]} → {soh['cycle_range'][1]}）")
-    print(f"  首圈放电容量        {soh['first_discharge_cap_ah']} Ah")
-    print(f"  末圈放电容量        {soh['last_discharge_cap_ah']} Ah")
+    print(f"  首圈放电容量        {soh['first_discharge_cap_mah']} mAh")
+    print(f"  末圈放电容量        {soh['last_discharge_cap_mah']} mAh")
     print(f"  容量保持率          {soh['capacity_retention_pct']} %")
     print(f"  库仑效率 首/末      {soh['coulomb_efficiency_first_pct']} % / {soh['coulomb_efficiency_last_pct']} %")
     print(f"  能量效率 首/末      {soh['energy_efficiency_first_pct']} % / {soh['energy_efficiency_last_pct']} %")

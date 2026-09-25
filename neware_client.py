@@ -834,13 +834,25 @@ def _attr_dict(d: dict[str, Any]) -> str:
 # --------------------------------------------------------------------------
 
 def build_transport(args: argparse.Namespace) -> Transport:
-    if args.transport == "pipe":
-        return PipeTransport(args.pipe or PIPE_CLIENT, args.timeout)
-    if args.transport == "tcp":
-        if not args.host:
+    """按命令行参数构造传输对象。
+
+    ★ 这里一律用 getattr 带默认值，而不是直接取 args.timeout。
+    原因：不同脚本的 argparse 定义的参数并不完全一样，
+    曾经因为某个脚本少定义了 --timeout，导致运行时抛
+    AttributeError 而不是给出有用的错误。改成 getattr 之后，
+    任何脚本传进来的 args 都能用。
+    """
+    transport = getattr(args, "transport", "tcp")
+    timeout = getattr(args, "timeout", DEFAULT_TIMEOUT)
+
+    if transport == "pipe":
+        return PipeTransport(getattr(args, "pipe", None) or PIPE_CLIENT, timeout)
+    if transport == "tcp":
+        host = getattr(args, "host", None)
+        if not host:
             raise NewareError("TCP 方式必须用 --host 指定运行 BTS Client 的电脑 IP")
-        return TcpTransport(args.host, args.port, args.timeout)
-    raise NewareError(f"未知传输方式：{args.transport}")
+        return TcpTransport(host, getattr(args, "port", DEFAULT_TCP_PORT), timeout)
+    raise NewareError(f"未知传输方式：{transport}")
 
 
 def write_rows(rows: list[dict[str, Any]], path: str | None,
