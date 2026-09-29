@@ -245,63 +245,144 @@ def _sig(v: float, digits: int = 6) -> float:
     return round(x, digits - 1 - math.floor(math.log10(abs(x))))
 
 
+CAP_TO_MAH = 1000.0
+"""容量/能量/电流的换算系数：**原始值是 Ah / Wh / A，×1000 得到 mAh / mWh / mA**。
+
+协议文档 v1.19 写的就是 A / Ah / Wh —— **文档是对的**。
+厂商的 BTSDA 显示的是 mA / mAh / mWh，两者差 1000 倍。
+
+2026-09-27 用 BTSDA 官方导出逐项复核确认（这是权威证据）：
+
+| 项 | 我们的原始值 | ×1000 | BTSDA / 测试方案声明 |
+|---|---|---|---|
+| 化成段充电电流 | 1.41806704e-05 | 0.01418 mA | 0.0142 mA ✓ |
+| 老化段充电电流 | 1.42028700793e-04 | 0.14203 mA | 0.1421 mA ✓ |
+| 化成首圈充电容量 | 2.123342711e-05 | 0.021233 mAh | 0.0212 mAh ✓ |
+
+（独立交叉验证：活性物质 1.184 mg × 比容量 120 mAh/g = 0.142 mAh，
+恰好等于测试方案里"老化段 1C"声明的 0.1421 mA —— 两头对得上。）
+
+所以下面统一 ×CAP_TO_MAH 输出，让 `_mah` / `_mwh` 这类字段名名副其实。
+**注意：落盘的 steps.csv / detail.csv 仍是原始值（Ah / Wh / A），不要改原始数据。**
+"""
+
+
+def _steptype(row: dict[str, Any]) -> str:
+    return (row.get("steptype") or "").strip().lower()
+
+
+def group_cycles(rows: list[dict[str, Any]]) -> list[list[dict[str, Any]]] | None:
+    """把工步层切成「一圈一块」—— 一圈 = 一个充电阶段 + 一个放电阶段。
+
+    **为什么不直接用 `cycleid`**：实测发现测试方案里有**多段「循环」工步**时
+    （例如"化成 3 圈 + 老化 5000 圈"），设备的 `cycleid` 只在**程序回到「循环」工步**
+    时才 +1；而"化成用完、往下落到老化"那一步不回到任何循环工步，于是**不 +1**
+    —— 结果相邻两圈共用一个 `cycleid`。
+
+    实测：602 个物理循环被数成 601 个，575 个被数成 575→576 少 1
+    （已用 BTSDA 官方导出对照确认：BTSDA 报 602，并按工步序列正确分组）。
+
+    **这里用的规则**：一圈里只该有一个"充电阶段"。
+    所以同一组里，如果**已经出现过放电、又来了充电类工步**，就是新一圈的开始。
+
+    返回 None 表示切出来的块不合格（某块有充无放或有放无充），
+    调用方应退回按 `cycleid` 分组 —— **宁可少切，也不能切错**。
+    """
+    blocks: list[list[dict[str, Any]]] = []
+    cur: list[dict[str, Any]] = []
+    seen_discharge = False
+    for row in rows:
+        st = _steptype(row)
+        if cur and seen_discharge and st in CHARGING_STEPTYPES:
+            blocks.append(cur)
+            cur, seen_discharge = [], False
+        cur.append(row)
+        if st in DISCHARGING_STEPTYPES:
+            seen_discharge = True
+    if cur:
+        blocks.append(cur)
+
+    for b in blocks:
+        types = {_steptype(r) for r in b}
+        if not (types & CHARGING_STEPTYPES) or not (types & DISCHARGING_STEPTYPES):
+            return None
+    return blocks
+
+
+def _group_by_cycleid(rows: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    """退回方案：按 `cycleid` 分组（单段循环的方案下它是正确的）。"""
+    groups: dict[int, list[dict[str, Any]]] = {}
+    for row in rows:
+        c = _as_int(row.get("cycleid"), -1)
+        if c >= 0:
+            groups.setdefault(c, []).append(row)
+    return [groups[c] for c in sorted(groups)]
+
+
 def soh_preview(steps: list[dict[str, Any]]) -> dict[str, Any]:
     """用工步层数据算 SOH 关键指标。
 
-    口径说明：工步层的 cap/eng 是"该工步内的累计值"，所以同一循环内
-    各充电工步的 cap 求和 = 该循环总充电容量，放电同理。
-    容量保持率相对第一圈放电容量计算。
+    口径说明：
+
+    1. 工步层的 `cap` / `eng` 是"**该工步内的累计值**"，所以同一圈内
+       各充电工步的 cap 求和 = 该圈总充电容量，放电同理。
+    2. **分圈不按 `cycleid`**（多段循环时它会重复），按"充电阶段"切 —— 见 `group_cycles`。
+    3. **圈号是顺序号**（1..N），和 BTSDA / 客户端显示的一致。
+    4. `cap` / `eng` 原始值是 **Ah / Wh**，这里 ×1000 输出成 **mAh / mWh**
+       （字段名 `_mah` / `_mwh` 才是名副其实的）。
     """
-    cycles: dict[int, dict[str, float]] = {}
-    dcir_by_cycle: dict[int, float] = {}
+    blocks = group_cycles(steps)
+    if blocks is None:
+        blocks = _group_by_cycleid(steps)
 
-    for row in steps:
-        cycle = _as_int(row.get("cycleid"), -1)
-        if cycle < 0:
-            continue
-        steptype = (row.get("steptype") or "").strip().lower()
-        cap = _as_float(row.get("cap"), 0.0) or 0.0
-        eng = _as_float(row.get("eng"), 0.0) or 0.0
-        bucket = cycles.setdefault(cycle, {"charge_cap": 0.0, "dis_cap": 0.0,
-                                           "charge_eng": 0.0, "dis_eng": 0.0})
-        if steptype in CHARGING_STEPTYPES:
-            bucket["charge_cap"] += cap
-            bucket["charge_eng"] += eng
-        elif steptype in DISCHARGING_STEPTYPES:
-            bucket["dis_cap"] += cap
-            bucket["dis_eng"] += eng
-            dcir = _as_float(row.get("dcir"))
-            if dcir is not None and dcir > 0:
-                dcir_by_cycle[cycle] = dcir
+    cycles: list[dict[str, Any]] = []
+    for rows in blocks:
+        chg_cap = dis_cap = chg_eng = dis_eng = 0.0
+        dcir: float | None = None
+        for row in rows:
+            st = _steptype(row)
+            cap = _as_float(row.get("cap"), 0.0) or 0.0
+            eng = _as_float(row.get("eng"), 0.0) or 0.0
+            if st in CHARGING_STEPTYPES:
+                chg_cap += cap
+                chg_eng += eng
+            elif st in DISCHARGING_STEPTYPES:
+                dis_cap += cap
+                dis_eng += eng
+                d = _as_float(row.get("dcir"))
+                if d is not None and d > 0:
+                    dcir = d
+        cycles.append({"charge_cap": chg_cap, "dis_cap": dis_cap,
+                       "charge_eng": chg_eng, "dis_eng": dis_eng, "dcir": dcir})
 
-    usable = {c: v for c, v in cycles.items() if v["dis_cap"] > 0}
+    # 只保留"真的放出了电"的圈。判据用**原始量级**（Ah）—— 阈值也按原始量级给，
+    # 乘了换算系数会让"零放电"的圈被算成有效。
+    usable = [(i + 1, c) for i, c in enumerate(cycles) if c["dis_cap"] > 0]
     if not usable:
         return {"available": False,
                 "reason": "工步层数据中找不到有效的放电容量（cap），可能工步类型定义与预期不同"}
 
-    order = sorted(usable)
-    first, last = order[0], order[-1]
-    first_cap = usable[first]["dis_cap"]
-    last_cap = usable[last]["dis_cap"]
+    first_no, first = usable[0]
+    last_no, last = usable[-1]
+    first_cap = first["dis_cap"] * CAP_TO_MAH
+    last_cap = last["dis_cap"] * CAP_TO_MAH
 
-    def _ce(cycle: int) -> float | None:
-        c = usable[cycle]
+    def _ce(c: dict[str, Any]) -> float | None:
         return round(c["dis_cap"] / c["charge_cap"] * 100, 2) if c["charge_cap"] else None
 
-    def _ee(cycle: int) -> float | None:
-        c = usable[cycle]
+    def _ee(c: dict[str, Any]) -> float | None:
         return round(c["dis_eng"] / c["charge_eng"] * 100, 2) if c["charge_eng"] else None
 
     retention_curve = [
-        {"cycle": c, "dis_cap": _sig(usable[c]["dis_cap"]),
-         "retention_pct": round(usable[c]["dis_cap"] / first_cap * 100, 3)}
-        for c in order
+        {"cycle": no, "dis_cap": _sig(c["dis_cap"] * CAP_TO_MAH),
+         "retention_pct": round(c["dis_cap"] / first["dis_cap"] * 100, 3)}
+        for no, c in usable
     ]
 
     return {
         "available": True,
-        "cycle_count": len(order),
-        "cycle_range": [first, last],
+        "cycle_count": len(usable),
+        "cycle_range": [first_no, last_no],
         "first_discharge_cap_mah": _sig(first_cap),
         "last_discharge_cap_mah": _sig(last_cap),
         "capacity_retention_pct": round(last_cap / first_cap * 100, 2),
@@ -309,11 +390,11 @@ def soh_preview(steps: list[dict[str, Any]]) -> dict[str, Any]:
         "coulomb_efficiency_last_pct": _ce(last),
         "energy_efficiency_first_pct": _ee(first),
         "energy_efficiency_last_pct": _ee(last),
-        "dcir_first_mohm": dcir_by_cycle.get(first),
-        "dcir_last_mohm": dcir_by_cycle.get(last),
+        "dcir_first_mohm": first["dcir"],
+        "dcir_last_mohm": last["dcir"],
         "dcir_growth_pct": (
-            round(dcir_by_cycle[last] / dcir_by_cycle[first] * 100, 2)
-            if dcir_by_cycle.get(first) and dcir_by_cycle.get(last) else None
+            round(last["dcir"] / first["dcir"] * 100, 2)
+            if first["dcir"] and last["dcir"] else None
         ),
         # 曲线截断到 CURVE_CAP 圈。note 里必须说清"截断到多少"，
         # 否则读的人会以为下面就是完整曲线（旧版就是这样误导的）。

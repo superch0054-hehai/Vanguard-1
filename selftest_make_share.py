@@ -27,24 +27,44 @@ def make_fake_data() -> None:
 
     sets = [
         dict(ch="27-188-10-1", tid="247", bc="D:测试数据黄坤1", cyc=1, ret=100.0,
-             rows=1241, complete=True, curve=True),
+             rows=1241, complete=True, curve=True, series=True),
         dict(ch="27-188-10-2", tid="244", bc="D672035TAA112", cyc=185, ret=17.24,
-             rows=59253, complete=False, curve=False),
+             rows=59253, complete=False, curve=False, series=False),
     ]
     recs = []
     for s in sets:
         d = DATA / f"channel={s['ch']}" / f"testid={s['tid']}"
         d.mkdir(parents=True)
-        (d / "steps.csv").write_text(
-            "startseqid,endseqid,stepindex,stepid,cycleid,steptype,steptime,"
-            "endatime,startvolt,endvolt,startcurr,endcurr,cap,eng,dcir,dbc\n"
-            "1,781,1,1,1,cc,21026000,2026-09-23 15:54:02,0.49,2.00,"
-            "0.000284,0.000284,0.00166,0.00234,0,[]\n"
-            "782,798,2,2,1,rest,300000,2026-09-23 15:59:02,1.95,1.82,"
-            "0,0,0,0,176118.7,[]\n"
-            "799,1241,3,3,1,dc,11995600,2026-09-23 19:18:57,1.77,0.93,"
-            "-0.000284,-0.000284,0.000947,0.00112,169166.9,[]\n",
-            encoding="utf-8")
+        if s["series"]:
+            # ★ 造一条"真实形状"的 10 圈序列：前 9 圈平缓衰减，第 10 圈突然掉一大截。
+            #   为什么要这么造：make_share 现在**从 steps.csv 现算**（不再照抄 manifest
+            #   里采集时缓存的指标），所以步骤数据本身必须足够真实，才能测到
+            #   逐圈曲线、单圈衰减率、衰减加速点这些渲染。
+            rows = ["startseqid,endseqid,stepindex,stepid,cycleid,steptype,steptime,"
+                    "endatime,startvolt,endvolt,startcurr,endcurr,cap,eng,dcir,dbc"]
+            dis_caps = [0.0002 - 0.000001 * i for i in range(9)] + [0.000172]
+            n = 0
+            for i, dcap in enumerate(dis_caps, start=1):
+                for st, cap, eng, dcir in (
+                        ("cc", "0.0003", "0.0008", str(150000 + i * 1000)),
+                        ("rest", "0", "0", "0"),
+                        ("dc", repr(dcap), repr(dcap * 2.5), str(160000 + i * 2000)),
+                        ("rest", "0", "0", "0")):
+                    n += 1
+                    rows.append(f"{n},{n},{n},{i},{i},{st},300000,"
+                                f"2026-09-23 10:00:00,1.0,2.0,0,0,{cap},{eng},{dcir},[]")
+            (d / "steps.csv").write_text("\n".join(rows) + "\n", encoding="utf-8")
+        else:
+            (d / "steps.csv").write_text(
+                "startseqid,endseqid,stepindex,stepid,cycleid,steptype,steptime,"
+                "endatime,startvolt,endvolt,startcurr,endcurr,cap,eng,dcir,dbc\n"
+                "1,3,1,2,1,cc,5361900,2026-09-23 09:56:49,0.29,3.30,"
+                "0.0000142,0.0000142,0.0000211,0.0000405,1208500,[]\n"
+                "4,5,2,3,1,rest,300000,2026-09-23 10:01:49,3.24,2.09,"
+                "0,0,0,0,4374836,[]\n"
+                "6,7,3,4,1,dc,729600,2026-09-23 10:13:59,2.06,0.50,"
+                "-0.0000142,-0.0000142,0.0000029,0.0000026,2400277,[]\n",
+                encoding="utf-8")
         (d / "detail.csv").write_text(
             "seqid,stepid,cycleid,steptype,testtime,atime,volt,curr,cap,eng,CPU,dbc\n"
             "1,1,0,cc,0,2026-09-23 10:03:36,0.4932,0.000284,0,0,34.9,[]\n",
@@ -54,9 +74,13 @@ def make_fake_data() -> None:
             "devtype_name": "BTS85", "devid": 188, "subdevid": 10,
             "chlid": int(s["ch"].split("-")[-1]), "testid": s["tid"],
             "barcode": s["bc"], "collected_at": "2026-09-25T13:52:55",
-            "upload_complete": s["complete"], "step_count": 3,
+            "upload_complete": s["complete"],
+            "step_count": 40 if s["series"] else 3,
             "detail_count": s["rows"], "dir": str(d),
             "parser_version": "collector 1.0",
+            # ★ manifest 里的 soh 故意留成一份"过期的缓存值"：
+            #   现在 make_share 会拿 steps.csv 现算，不照抄这里 ——
+            #   这正是为了修"改了口径、共享目录数字却纹丝不动"的毛病。
             "soh": {
                 "available": True, "cycle_count": s["cyc"],
                 "cycle_range": [1, s["cyc"]],
@@ -153,9 +177,11 @@ def main() -> int:
         ("圈号差 1", "明细和工步层差 1"),
         ("容量是工步内累计", "该工步内"),
         ("不要对全表取最大值", "不要对全表取最大值"),
-        ("电流单位 mA（不是 A）", "不是 A"),
-        ("容量单位 mAh（不是 Ah）", "不是 Ah"),
-        ("能量单位 mWh（不是 Wh）", "不是 Wh"),
+        ("★ 单位：协议文档是对的（A / Ah / Wh）", "协议文档 v1.19 写的就是 A / Ah / Wh"),
+        ("★ 原始值要 ×1000 才等于 BTSDA 的 mAh", "×1000"),
+        ("★ 提醒 CSV 与 summary 差 1000 倍是正常的", "差 1000 倍是正常的"),
+        ("★ cycleid 不能用来数圈数", "不能用来数圈数"),
+        ("★ 多段循环会少 N−1 个号", "少 N−1 个号"),
         ("内阻单位 mΩ", "mΩ"),
         ("testtime 是毫秒", "毫秒"),
         ("每个工步归零", "每个工步归零"),
@@ -183,7 +209,9 @@ def main() -> int:
     print(BAR)
     c.ok("pandas" in text, "给了 pandas 示例")
     c.ok("isin(DIS)" in text or "isin([" in text, "示例里正确用了放电类筛选")
-    c.ok("groupby('cycleid')" in text, "示例里正确按圈分组")
+    c.ok("别用 cycleid 分组" in text, "★ 示例里明确警告不要用 cycleid 分组")
+    c.ok("cycle_no" in text, "示例里改成了按「充电阶段」切圈")
+    c.ok("per_cycle = per_cycle * 1000" in text, "★ 示例里做了 ×1000 换成 mAh")
     c.ok(".sum()" in text, "示例里正确求和（不是取最大值）")
     c.ok("cycleid'] == 54" in text, "示例里标注了明细圈号要 -1 对齐")
 
@@ -195,11 +223,11 @@ def main() -> int:
     c.ok("27-188-10-1" in idx and "27-188-10-2" in idx, "索引列了两个数据集")
     c.ok("D672035TAA112" in idx, "索引里有条码")
     c.ok("未传完" in idx, "索引标出了未传完的数据集")
-    c.ok("17.24" in idx, "索引里有容量保持率")
+    c.ok("86.0" in idx, "★ 索引里的保持率和 summary 一致（都现算，不照抄缓存）")
 
     s1 = (d1 / "summary.md").read_text(encoding="utf-8")
     c.ok("D:测试数据黄坤1" in s1, "摘要里有条码")
-    c.ok("169166" in s1 or "1.6917e+05" in s1, "摘要里有 DCIR")
+    c.ok("1.6200e+05" in s1, "摘要里有 DCIR（现算出来的值）")
     c.ok("直接引用，不要重算" in s1, "摘要里提醒不要重算")
     c.ok("不要整份读" in s1, "摘要里提醒别整份读明细")
     c.ok("恒流充电" in s1 or "cc" in s1, "摘要里带了工步预览")
@@ -209,21 +237,22 @@ def main() -> int:
     print("④b DCIR 增长率 + 逐圈衰减曲线（SOH 报告要用）")
     print(BAR)
     c.ok("DCIR 增长率" in s1, "摘要里有 DCIR 增长率")
-    c.ok("93.9" in s1, "DCIR 增长率渲染成 93.9（不是 9e+01 那种科学计数）")
+    c.ok("+111.1 %" in s1, "DCIR 增长率渲染成 111.1（不是 9e+01 那种科学计数）")
     c.ok("逐圈容量衰减" in s1, "摘要里有逐圈衰减小节")
     c.ok("| 循环 | 放电容量 (mAh) | 容量保持率 (%) | 单圈衰减率 (%) |" in s1,
          "衰减表有「单圈衰减率」列")
-    c.ok("| 2 |" in s1 and "0.211" in s1, "曲线数据逐行渲染出来了（含量化后的单圈衰减率）")
-    c.ok("工步层 3 行" in s1, "「数据文件」一节的行数没被循环变量遮蔽搞成 0")
+    c.ok("| 2 |" in s1 and "0.500" in s1, "曲线数据逐行渲染出来了（含量化后的单圈衰减率）")
+    c.ok("工步层 40 行" in s1, "「数据文件」一节的行数没被循环变量遮蔽搞成 0")
     c.ok("明细 1241 行" in s1, "明细行数也正确（这是被 r 遮蔽坑过的地方）")
     c.ok("衰减加速点（启发式）" in s1, "给出了衰减加速点")
     c.ok("**10**" in s1, "加速点定位到第 10 圈（夹具里故意掉在那一圈）")
     c.ok("不是唯一判据" in s1, "标注了这是启发式、不是定论")
-    c.ok("其余圈略" in s1, "曲线被截断时把提示 note 也带上")
+    c.ok("| 10 |" in s1 and "10.000" in s1, "10 圈全部渲染出来（没被截断）")
+    c.ok("现算" in s1, "★ 指标是拿 steps.csv 现算的，不是照抄 manifest 的缓存值")
     s2 = (SHARE / "channel=27-188-10-2" / "testid=244" / "summary.md").read_text(
         encoding="utf-8")
     c.ok("逐圈容量衰减" in s2, "第二个数据集也有这一节")
-    c.ok("现场补算" in s2, "manifest 里没曲线的老数据，从 steps.csv 补算出来")
+    c.ok("现算" in s2, "第二个数据集同样现算（不再照抄缓存）")
 
     print()
     print(BAR)

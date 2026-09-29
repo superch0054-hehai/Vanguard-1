@@ -287,8 +287,13 @@ def test_commands(c: Checker) -> None:
     c.ok('<V1I1 previousstep="1" type="1" value=""/>' in sent, "V1I1 默认取值方式")
     c.ok('<V2I2 previousstep="0" type="0" value=""/>' in sent, "V2I2 默认取值方式")
 
+    # 下面三处 start 都传 force=True：这里测的是**报文拼装**，与"启动前先查
+    # 通道状态"那道安全闸无关（夹具通道 25-41-1-1 不在 GETCHLSTATUS_RESP 样例里，
+    # 不 force 会被 fail-closed 拦下 —— 那正是闸该有的行为）。
+    # 状态闸本身由 selftest_control.py 单独覆盖。
     client.start([(Channel(25, 41, 1, 1), r"D:\stepManager\test\1.xml", "D672035TAA11")],
-                 backup={"backupdir": r"D:\temp\backup", "filetype": 0, "filenametype": 1})
+                 backup={"backupdir": r"D:\temp\backup", "filetype": 0, "filenametype": 1},
+                 force=True)
     sent = fake.sent[-1]
     c.ok('<list count="1">' in sent, "start count")
     c.ok('barcode="D672035TAA11">D:\\stepManager\\test\\1.xml</start>' in sent,
@@ -300,14 +305,14 @@ def test_commands(c: Checker) -> None:
     client.start([
         (Channel(25, 41, 1, 1), r"D:\s\1.xml", "BAR001", "SC20-第3批"),
         (Channel(25, 41, 1, 2), r"D:\s\1.xml", "BAR002", "SC20-第3批"),
-    ])
+    ], force=True)
     sent = fake.sent[-1]
     c.ok('<list count="2">' in sent, "start 多通道 count")
     c.ok('barcode="BAR001" remark="SC20-第3批">D:\\s\\1.xml</start>' in sent,
          "remark 备注作为 start 元素的属性（QL-165829）")
     c.ok(sent.count('remark="SC20-第3批"') == 2, "两个通道各自带备注")
 
-    client.start([(Channel(25, 41, 1, 1), r"D:\s\2.xml", "BAR003")])
+    client.start([(Channel(25, 41, 1, 1), r"D:\s\2.xml", "BAR003")], force=True)
     c.ok("remark" not in fake.sent[-1], "不带备注时不应出现 remark 属性")
 
     before = sum(1 for s in fake.sent if "<cmd>download</cmd>" in s)
@@ -402,9 +407,11 @@ def test_soh(c: Checker) -> None:
     c.ok(soh["available"], "合成数据可算出 SOH")
     c.eq(soh["cycle_count"], 3, "识别循环数")
     c.eq(soh["cycle_range"], [1, 3], "循环号范围")
-    c.eq(soh["first_discharge_cap_mah"], 0.19, "首圈放电容量")
-    c.eq(soh["last_discharge_cap_mah"], 0.18, "末圈放电容量")
-    c.eq(soh["capacity_retention_pct"], 94.74, "容量保持率 = 0.18/0.19")
+    # cap/eng 原始值是 Ah/Wh，soh_preview 会 ×1000 输出成 mAh/mWh
+    # （已用 BTSDA 官方导出复核：我们的原始值 ×1000 == BTSDA 的 mAh 值）
+    c.eq(soh["first_discharge_cap_mah"], 190.0, "首圈放电容量（×1000 换算成 mAh）")
+    c.eq(soh["last_discharge_cap_mah"], 180.0, "末圈放电容量（×1000）")
+    c.eq(soh["capacity_retention_pct"], 94.74, "容量保持率 = 0.18/0.19（比值，不受单位影响）")
     c.eq(soh["coulomb_efficiency_first_pct"], 95.0, "首圈库仑效率 = 0.19/0.20")
     c.eq(soh["coulomb_efficiency_last_pct"], 90.0, "末圈库仑效率 = 0.18/0.20")
     c.eq(soh["energy_efficiency_first_pct"], 93.75, "首圈能量效率 = 0.750/0.800")
@@ -426,6 +433,52 @@ def test_soh(c: Checker) -> None:
     note = many_soh["retention_curve"][-1].get("note", "")
     c.ok("仅列前" in note and str(CURVE_CAP) in note,
          "截断时的 note 说清了「只列前多少圈」", note)
+
+    print("\n[5c] ★ 分圈：多段「循环」工步时 cycleid 会重复，不能信它")
+    # 夹具照抄真实数据的形状：化成段用工步 2,3,4,5；老化段用 7,8,9,10；
+    # 在第 3 圈那里设备**没有递增 cycleid**，两圈挤进同一个 cycleid=3。
+    # 真实数据上这样会把 602 圈数成 601 圈（已用 BTSDA 官方导出确认 BTSDA 报 602）。
+
+    def r(cid, sid, st, cap="0"):
+        return {"cycleid": cid, "stepid": sid, "steptype": st,
+                "cap": cap, "eng": cap, "dcir": "100" if st in ("cc", "dc") else "0"}
+
+    body_a = lambda cid: [r(cid, "2", "cc", "0.0003"), r(cid, "3", "rest"),
+                          r(cid, "4", "dc", "0.0002"), r(cid, "5", "rest")]
+    body_b = lambda cid: [r(cid, "7", "cc", "0.0001"), r(cid, "8", "rest"),
+                          r(cid, "9", "dc", "0.00005"), r(cid, "10", "rest")]
+    two_loop = ([r("1", "1", "rest")] + body_a("1")   # 第1圈：前置搁置 + 化成
+                + body_a("2")                          # 第2圈
+                + body_a("3") + body_b("3")            # ★ cycleid=3 里塞了两圈
+                + body_b("4") + body_b("5"))           # 之后正常
+    # 真实圈数是 6（1~3 是化成，4~6 是老化），但 cycleid 只有 1,2,3,3,4,5 → 5 个
+    gs = soh_preview(two_loop)
+    c.eq(gs["cycle_count"], 6, "cycleid 只有 5 个不同值，但真实是 6 圈（多出来的那圈被合并了）")
+    c.eq(gs["cycle_range"], [1, 6], "圈号按顺序编，不再跟着重复的 cycleid")
+    c.eq(len(gs["retention_curve"]), 6, "曲线也是 6 个点")
+    c.ok(all(p.get("retention_pct", 0) <= 100.001 for p in gs["retention_curve"]),
+         "★ 没有哪一圈的保持率超过 100%（真实数据上踩过这个假值）",
+         str([p for p in gs["retention_curve"] if p.get("retention_pct", 0) > 100.001]))
+    halves = [p["dis_cap"] for p in gs["retention_curve"] if p.get("cycle") in (3, 4)]
+    c.eq(halves, [0.2, 0.05], "被并在一起的两圈被正确拆开（前半 0.2、后半 0.05）")
+
+    # 单段循环（每圈一次充放）不该被改动
+    single = []
+    for i, (cc, dc) in enumerate([("0.0003", "0.00027"), ("0.0002", "0.00017"),
+                                  ("0.0001", "0.00007")], start=1):
+        single += [r(str(i), "7", "cc", cc), r(str(i), "8", "rest"),
+                   r(str(i), "9", "dc", dc), r(str(i), "10", "rest")]
+    ss = soh_preview(single)
+    c.eq(ss["cycle_count"], 3, "单段循环：圈数不受影响")
+
+    # 安全阀：切出来的块如果有充无放（或有放无充），整体放弃 → 退回按 cycleid 分组。
+    # 宁可少切，也不能切错。
+    from probe import group_cycles
+    c.ok(group_cycles([r("1", "4", "dc", "0.1"), r("1", "2", "cc", "0.1"),
+                       r("2", "4", "dc", "0.1"), r("2", "2", "cc", "0.1")]) is None,
+         "切出「只有放电没有充电」的块时，返回 None（调用方会退回 cycleid 分组）")
+    c.ok(group_cycles([]) == [] or group_cycles([]) is None,
+         "空输入不炸")
 
     print("\n[5b] ★ 小容量不能被取整抹掉（真实数据上踩过）")
     # 原来用 round(v, 6)：4.89e-07 → 0，5.05e-07 → 1e-06。既丢数据又歪曲数值，

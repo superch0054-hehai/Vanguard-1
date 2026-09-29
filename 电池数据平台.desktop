@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=电池数据平台
+Name[en]=BatteryLab Console
+Comment=打开 BatteryLab 数据控制台（只读：看数据、看图、刷新共享数据）
+Comment[en]=Open the BatteryLab read-only data console
+# 双击这个图标会：
+#   ① 确保采集服务和网页控制台在跑（已在跑就是空操作）
+#   ② 用默认浏览器打开控制台
+# 所以研究员不需要碰终端。
+Exec=bash -c "cd /home/admin/batterylab && ./service.sh start >/dev/null 2>&1; xdg-open http://127.0.0.1:8090"
+Icon=utilities-system-monitor
+Terminal=false
+StartupNotify=false
+Categories=Utility;Science;

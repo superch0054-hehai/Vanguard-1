@@ -76,6 +76,19 @@ STATUS_NAMES = {
 CHARGING_STEPTYPES = {"cc", "cv", "cccv", "pcccv", "cp", "cr", "pulse"}
 DISCHARGING_STEPTYPES = {"dc", "dv", "cccd", "dp", "dr"}
 
+# 允许**启动**测试的通道状态 —— 即"这个通道手上没有正在跑的测试"。
+#
+# 为什么不是"除了 working 都行"：pause 意味着有一份测试挂在那儿，
+# 对它发 start 会把它顶掉。所以只认下面这三种明确"没在跑"的状态。
+#
+# 政策出处：Empa 的 aurora-neware（MIT）在真实硬件上验证过的 start() 用的就是
+# 这一组 {finish, stop, protect}。沿用同一判据，便于两边的结论互相对照。
+#
+# 注意：和 collector.py 的 DONE_STATUSES 取值相同但**含义不同** ——
+# 那个是"可以去采集了"，这个是"可以启动了"。故意分成两个常量：
+# 将来若有一条要改，不会连带把另一条改错。
+STARTABLE_STATUSES = ("finish", "stop", "protect")
+
 
 class NewareError(RuntimeError):
     """通讯或协议层面的错误。"""
@@ -659,8 +672,90 @@ class NewareClient:
 
     # -- 2.1.3 启动 --------------------------------------------------------
 
+    @staticmethod
+    def parse_ack(resp: Response) -> list[dict[str, Any]]:
+        """解析写命令的回包（start_resp / stop_resp / light_resp / clearflag_resp …）。
+
+        这些回包的结构是：
+
+            <cmd>xxx_resp</cmd>
+            <list count="N">
+              <start ip="…" devtype="27" devid="21" subdevid="1" chlid="1">ok</start>
+              …
+            </list>
+
+        元素文本是 **ok**（成功）或 **false**（失败）。`reset_resp` 没有 `<list>`、
+        元素名就是 `reset`，所以两种形态都收。
+
+        为什么需要它：读命令的解析器早就有（parse_status / parse_inquire /
+        parse_data / parse_inquiredf），而**写命令一个解析器都没有** ——
+        因为写方法从来没被调用过，没人写。动设备之前必须先有它，
+        否则"发出去到底成没成"根本读不出来。
+
+        返回每通道一条：通道四元组 + `ack`（原文）+ `ok`（布尔）。
+        """
+        # 优先收 <list> 里的；没有 <list>（如 reset_resp）就收根下的直接子元素
+        holder = resp.root.find("list")
+        elements = list(holder) if holder is not None else [
+            el for el in resp.root if el.tag != "cmd"]
+
+        out: list[dict[str, Any]] = []
+        for el in elements:
+            ack = (el.text or "").strip()
+            row: dict[str, Any] = {"tag": el.tag, "ack": ack,
+                                   "ok": ack.lower() == "ok"}
+            for name in ("ip", "devtype", "devid", "subdevid", "chlid"):
+                v = el.get(name)
+                if v is None:
+                    continue
+                if name == "ip":
+                    row[name] = v
+                else:
+                    row[name] = int(v) if v.lstrip("-").isdigit() else v
+            out.append(row)
+        return out
+
+    def assert_startable(self, channels: Sequence[Channel]) -> dict[str, str]:
+        """启动前的安全闸：只要有一个通道不是"没在跑"，就抛错、**一个字节都不发**。
+
+        为什么必须放在协议层而不是调用方：start 是唯一能顶掉正在跑的测试的操作，
+        而正在跑的数据**无法追溯恢复**。放在这里，任何调用方都绕不过去。
+
+        判定是 **fail-closed（宁可拒绝，不可放过）**：
+          - 目标通道不在回应里（读不到状态）→ 拒绝。读不到就不敢开，
+            而不是"没看到 working 就当它闲着"。
+          - 状态不在 STARTABLE_STATUSES 里 → 拒绝，并把是哪些通道、什么状态报出来。
+          - 回应里混进了没请求的通道 → 忽略，不参与判断（协议实测会串通道）。
+        """
+        wanted = {c.key: c for c in channels}
+        rows = self.parse_status(self.getchlstatus(channels))
+        seen: dict[str, str] = {}
+        for r in rows:
+            key = f"{r['devtype']}-{r['devid']}-{r['subdevid']}-{r['chlid']}"
+            if key in wanted:
+                seen[key] = r["status"]
+
+        missing = sorted(set(wanted) - set(seen))
+        blocked = {k: v for k, v in seen.items()
+                   if v.lower() not in STARTABLE_STATUSES}
+        if missing or blocked:
+            problems = []
+            if blocked:
+                problems.append("这些通道正在跑或状态不明："
+                                + ", ".join(f"{k}={v}({STATUS_NAMES.get(v, '?')})"
+                                            for k, v in sorted(blocked.items())))
+            if missing:
+                problems.append("这些通道读不到状态（回应里没有）："
+                                + ", ".join(missing))
+            raise NewareError(
+                "拒绝启动：" + "；".join(problems)
+                + f"。只允许在 {'/'.join(STARTABLE_STATUSES)} 状态启动。"
+                  "确认通道确实空闲后，可显式传 force=True 绕过本检查。")
+        return seen
+
     def start(self, items: Sequence[tuple],
-              dbc_can: int | None = None, backup: dict | None = None) -> Response:
+              dbc_can: int | None = None, backup: dict | None = None,
+              force: bool = False) -> Response:
         """启动测试。
 
         items 的每一项可以是三元组或四元组：
@@ -671,7 +766,14 @@ class NewareClient:
         会显示在客户端界面的通道信息里，便于区分"这几颗电池在跑同一套工步"。
         backup 非空时，客户端会在测试结束后自动把数据文件导出到指定目录
         （filetype=0 导出 NDA，filetype=1 导出 Excel）。
+
+        force=False（默认）时会先查一遍通道状态，**只要有一个通道在跑就拒绝**，
+        一个字节都不发（见 assert_startable）。force=True 跳过该检查 ——
+        只在"你确定这颗通道的数据不要了"时才用。
         """
+        if not force:
+            self.assert_startable([item[0] for item in items])
+
         attr = f' count="{len(items)}"'
         if dbc_can is not None:
             attr += f' DBC_CAN="{dbc_can}"'
@@ -785,12 +887,31 @@ class NewareClient:
             f'<cmd>getparallel</cmd>\n<list count="{len(channels)}">\n{items}\n</list>')
 
     def resetalarm(self, channels: Sequence[Channel]) -> Response:
-        items = "\n".join(f'<resetalarm {c.attrs()} />' for c in channels)
+        """声光报警复位（协议 2.1.17）。
+
+        ★ 这是**设备级**命令：节点只有 ip/devtype/devid，**没有**
+        subdevid/chlid（协议样例就是三台设备各一条），且元素文本必须是 true。
+        之前发成"通道级 + 自闭合"，与协议不符 —— 2026-09-29 对照协议原文修正。
+        所以这里虽然收 channels，只取每台的设备三元组，同一台设备会去重。
+        """
+        seen: dict[tuple, Channel] = {}
+        for c in channels:
+            seen.setdefault((c.ip, c.devtype, c.devid), c)
+        items = "\n".join(
+            f'<resetalarm ip="{_attr(c.ip)}" devtype="{c.devtype}" '
+            f'devid="{c.devid}">true</resetalarm>'
+            for c in seen.values())
         return self.request(
-            f'<cmd>resetalarm</cmd>\n<list count="{len(channels)}">\n{items}\n</list>')
+            f'<cmd>resetalarm</cmd>\n<list count="{len(seen)}">\n{items}\n</list>')
 
     def clearflag(self, channels: Sequence[Channel]) -> Response:
-        items = "\n".join(f'<clearflag {c.attrs()} />' for c in channels)
+        """清除标记（协议 2.1.18）。
+
+        ★ 协议样例的节点文本是 **true**，不是自闭合 ——
+        之前发成 `<clearflag … />`，与协议不符。2026-09-29 修正。
+        """
+        items = "\n".join(
+            f'<clearflag {c.attrs()}>true</clearflag>' for c in channels)
         return self.request(
             f'<cmd>clearflag</cmd>\n<list count="{len(channels)}">\n{items}\n</list>')
 

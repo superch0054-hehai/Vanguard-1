@@ -9,7 +9,8 @@
 
   1. **一份「口径规则」** —— 否则它自己用 pandas 重算，会算出不一样的结果
      （我们已经吃过亏：明细和工步层的 cycleid 差 1、cap 是工步内累计、
-      单位是 mAh 不是 Ah……这些都是对账才搞清的）
+      原始单位是 A/Ah/Wh 不是 mA/mAh/mWh、多段循环时 cycleid 会重复……
+      这些都是拿真实数据和 BTSDA 官方导出逐项对账才搞清的）
   2. **一份索引** —— 它得先知道有哪些数据集
   3. **每份数据的摘要** —— 一眼看清这颗电池怎么样，不用去读几 MB 的明细
 
@@ -188,6 +189,18 @@ def build_readme(recs: list[dict], generated: str) -> str:
     a("**所以：要对齐圈号就用工步层；如果手上是明细，圈号要 `+1`。**")
     a("这两个表是同一次测试的两份视图，`stepid` 是对得上的，只有 `cycleid` 起点不同。")
     a("")
+    a("**⚠️ 更要紧的一条：`cycleid` 不能用来数圈数。**")
+    a("")
+    a("测试方案里有**多段「循环」工步**时（例如「化成 3 圈 + 老化 5000 圈」），")
+    a("设备的 `cycleid` 只在**程序回到「循环」工步**时才 +1；而「化成用完、往下落到老化」")
+    a("那一步**不回到任何循环工步**，于是**不 +1** —— **相邻两圈共用一个 `cycleid`**。")
+    a("")
+    a("实测：**602 个物理循环被数成 601 个**（已用 BTSDA 官方导出对照确认，BTSDA 报 602）。")
+    a("多段循环的方案里，**N 段循环就会少 N−1 个号**。")
+    a("")
+    a("**所以数圈数请用 `summary.md` 的 `cycle_count`** —— 我们已经按「一圈 = 一对充放电」")
+    a("重新分好，和 BTSDA / 客户端显示的一致。`cycleid` 只当参考。")
+    a("")
     a("### 2. 容量 `cap` 是「该工步内」累计的，不是整圈的")
     a("")
     a("要算「某一圈的放电容量」，必须：")
@@ -202,16 +215,30 @@ def build_readme(recs: list[dict], generated: str) -> str:
     a("充电类工步是：`cc` `cv` `cccv` `pcccv` `cp` `cr` `pulse`；")
     a("`rest`（搁置）/`pause`/`end` 不产生容量。")
     a("")
-    a("### 3. 单位（协议文档写错了，以这里为准）")
+    a("### 3. ★ 单位：CSV 里是 A / Ah / Wh，`summary.md` 里是 mA / mAh / mWh")
     a("")
-    a("| 字段 | 单位 | 说明 |")
+    a("**协议文档 v1.19 写的就是 A / Ah / Wh —— 文档没错。**")
+    a("厂商的 BTSDA 软件显示的是 mA / mAh / mWh，**两者差 1000 倍**。")
+    a("")
+    a("| 字段 | `steps.csv` / `detail.csv` 里的原始值 | `summary.md` 里的指标 |")
     a("|---|---|---|")
-    a("| `volt` 电压 | **V** | |")
-    a("| `curr` 电流 | **mA** | ⚠️ 不是 A |")
-    a("| `cap` 容量 | **mAh** | ⚠️ 不是 Ah |")
-    a("| `eng` 能量 | **mWh** | ⚠️ 不是 Wh |")
-    a("| `dcir` 内阻 | **mΩ** | |")
+    a("| `volt` 电压 | **V** | V |")
+    a("| `curr` 电流 | **A** | mA（×1000） |")
+    a("| `cap` 容量 | **Ah** | **mAh（×1000）** |")
+    a("| `eng` 能量 | **Wh** | **mWh（×1000）** |")
+    a("| `dcir` 内阻 | **mΩ** | mΩ（不换算） |")
     a("| `testtime` | **毫秒** | 是「本工步已运行时间」，**每个工步归零** |")
+    a("")
+    a("**复核依据**（2026-09-27 用 BTSDA 官方导出逐项核对）：")
+    a("- 化成段充电电流 原始 `1.41806704e-05` ×1000 = `0.01418 mA`，测试方案声明 `0.0142 mA` ✓")
+    a("- 老化段充电电流 原始 `1.42028700793e-04` ×1000 = `0.14203 mA`，测试方案声明 `0.1421 mA` ✓")
+    a("- 容量同样：原始值 ×1000 == BTSDA 的 mAh 值 ✓")
+    a("")
+    a("> ⚠️ **所以：CSV 里的原始数字和 `summary.md` 里的指标差 1000 倍是正常的**，")
+    a("> 不是数据不一致。要用 CSV 里的 `cap` 自己算指标，**记得先 ×1000 换成 mAh**。")
+    a("")
+    a("> 另外提醒：**容量保持率、库仑效率这类比值不受单位影响**，两边怎么算都一样。")
+    a("> 这正是这个单位问题长期没被发现的原因 —— 比值一致，把绝对值的错盖住了。")
     a("")
     a("### 4. 电流符号：充电为正、放电为负")
     a("")
@@ -293,11 +320,18 @@ def build_readme(recs: list[dict], generated: str) -> str:
     a("```python")
     a("import pandas as pd")
     a("df = pd.read_csv('channel=.../testid=.../steps.csv')")
+    a("kinds = df['steptype'].str.strip().str.lower()")
     a("")
-    a("# 只保留放电类工步，按圈求和 —— 这是关键")
+    a("# ★ 别用 cycleid 分组！多段循环的方案下它会重复（两圈并成一圈）。")
+    a("#   正确做法：按「充电阶段」切 —— 已经放过电之后，再遇到充电类工步就是新的一圈。")
+    a("#   （和 probe.py 里 group_cycles() 的做法一致）")
+    a("CHG = ['cc', 'cv', 'cccv', 'pcccv', 'cp', 'cr', 'pulse']")
     a("DIS = ['dc', 'dv', 'cccd', 'dp', 'dr']")
-    a("dis = df[df['steptype'].isin(DIS)]")
-    a("per_cycle = dis.groupby('cycleid')['cap'].sum().sort_index()")
+    a("cycle_no = ((kinds.isin(CHG)) & (kinds.isin(DIS).cumsum() > 0)).cumsum()")
+    a("")
+    a("dis = df[kinds.isin(DIS)]")
+    a("per_cycle = dis.groupby(cycle_no[kinds.isin(DIS)])['cap'].sum().sort_index()")
+    a("per_cycle = per_cycle * 1000        # ★ 原始单位是 Ah，×1000 换成 mAh")
     a("")
     a("retention = per_cycle.iloc[-1] / per_cycle.iloc[0] * 100")
     a("print(f'{retention:.2f} %')")
@@ -305,11 +339,11 @@ def build_readme(recs: list[dict], generated: str) -> str:
     a("")
     a("### ④ 要画容量-循环曲线")
     a("")
-    a("用上面得到的 `per_cycle`：")
+    a("用上面得到的 `per_cycle`（已经是 mAh）：")
     a("")
     a("```python")
     a("import matplotlib.pyplot as plt")
-    a("plt.plot(per_cycle.index, per_cycle.values)   # 纵轴单位 mAh")
+    a("plt.plot(per_cycle.index, per_cycle.values)   # 纵轴 mAh")
     a("plt.xlabel('循环号'); plt.ylabel('放电容量 (mAh)')")
     a("```")
     a("")
@@ -319,7 +353,7 @@ def build_readme(recs: list[dict], generated: str) -> str:
     a("df = pd.read_csv('channel=.../testid=.../detail.csv')")
     a("# ★ 明细的 cycleid 比工步层小 1：想看第 55 圈，这里用 54")
     a("one = df[df['cycleid'] == 54].sort_values('seqid')")
-    a("plt.plot(one['cap'], one['volt'])      # 容量 mAh，电压 V")
+    a("plt.plot(one['cap'] * 1000, one['volt'])   # 容量原始是 Ah，×1000 得 mAh；电压 V")
     a("```")
     a("")
     a("### ⑥ 要比较两颗电池")
@@ -348,7 +382,7 @@ def build_readme(recs: list[dict], generated: str) -> str:
 # datasets.md —— 索引
 # ---------------------------------------------------------------------------
 
-def build_index(recs: list[dict], generated: str) -> str:
+def build_index(recs: list[dict], generated: str, data_dir: Path) -> str:
     L: list[str] = []
     a = L.append
     a("# 数据集索引")
@@ -362,7 +396,10 @@ def build_index(recs: list[dict], generated: str) -> str:
     a("| 通道 | 测试号 | 电池条码 | 采集时间 | 循环数 | 容量保持率 | 明细行数 | 完整 |")
     a("|---|---|---|---|---|---|---|---|")
     for r in sorted(recs, key=lambda x: x.get("collected_at", ""), reverse=True):
-        soh = r.get("soh") or {}
+        # ★ 和 summary.md 用同一套口径：现算，不照抄 manifest 里的缓存值，
+        #   否则索引里显示的保持率会和点进去看到的对不上。
+        ddir = resolve_dataset_dir(r, data_dir)
+        soh, _ = resolve_soh(r, ddir) if ddir else ((r.get("soh") or {}), "")
         ret = soh.get("capacity_retention_pct")
         cycles = soh.get("cycle_count", "")
         d = r.get("dir", "")
@@ -459,20 +496,43 @@ def backfill_curve(ddir: Path) -> list[dict]:
     已经落盘的老数据里没有曲线。但**历史测试不会再采一遍**（采集是由
     状态变化触发的），所以只能在这里补算 —— 否则老数据集永远没有衰减趋势。
 
-    `steps.csv` 只有几百到几千行，读进来算一遍很便宜。
+    （现在 `resolve_soh` 会直接用 `steps.csv` 现算，正常人已经不走这条；
+     留着是给"缓存里只有部分字段"的边角情况兜底。）
     """
+    return soh_preview(load_steps(ddir)).get("retention_curve") or []
+
+
+def load_steps(ddir: Path) -> list[dict[str, Any]]:
+    """读 `steps.csv`（几百~几千行，很便宜）。"""
     p = ddir / "steps.csv"
     if not p.exists():
         return []
     import csv as _csv
     try:
         with p.open("r", encoding="utf-8-sig", newline="") as f:
-            steps = list(_csv.DictReader(f))
+            return list(_csv.DictReader(f))
     except (OSError, UnicodeDecodeError):
         return []
-    if not steps:
-        return []
-    return soh_preview(steps).get("retention_curve") or []
+
+
+def resolve_soh(r: dict, ddir: Path) -> tuple[dict[str, Any], str]:
+    """算出这个数据集的 SOH 指标。返回 (指标, 来源说明)。
+
+    **优先用 `steps.csv` 现算**，而不是照抄 manifest 里缓存的那份 ——
+    manifest 里的 `soh` 是**采集那一刻**按当时的代码算的；口径修过之后
+    （比如单位换算 ×1000、分圈逻辑改了），缓存值就**过期**了。
+    照抄会让共享目录里的数字和当前代码不一致 —— Agent 读到的就是错的。
+
+    （2026-09-27 就踩过这个：改完分圈和单位，共享目录里的数字纹丝不动，
+     因为 make_share 只是把 manifest 里的旧值抄了一遍。）
+    """
+    if ddir.is_dir():
+        rows = load_steps(ddir)
+        if rows:
+            fresh = soh_preview(rows)
+            if fresh.get("available"):
+                return fresh, "根据 `steps.csv` 现算（和当前口径一致）"
+    return (r.get("soh") or {}), "取自采集时的缓存（`steps.csv` 读不到，退回 manifest）"
 
 
 # ---------------------------------------------------------------------------
@@ -480,8 +540,8 @@ def backfill_curve(ddir: Path) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def build_summary(r: dict, data_dir: Path, generated: str) -> str:
-    soh = r.get("soh") or {}
     ddir = resolve_dataset_dir(r, data_dir) or Path(".")
+    soh, soh_from = resolve_soh(r, ddir)
 
     L: list[str] = []
     a = L.append
@@ -502,6 +562,7 @@ def build_summary(r: dict, data_dir: Path, generated: str) -> str:
     a("## SOH 指标")
     a("")
     a("> 下面的指标按 `README.md` 里的口径算好。**直接引用，不要重算。**")
+    a(f"> 指标来源：{soh_from}")
     a("")
     if soh.get("available"):
         # 逐圈曲线先解析出来：上面判断「保持率有没有被化成循环带偏」要用它，
@@ -685,7 +746,7 @@ def main() -> int:
     (share_dir / "README.md").write_text(
         build_readme(recs, generated), encoding="utf-8")
     (share_dir / "datasets.md").write_text(
-        build_index(recs, generated), encoding="utf-8")
+        build_index(recs, generated, data_dir), encoding="utf-8")
     for r in recs:
         src = resolve_dataset_dir(r, data_dir)
         if src is None:

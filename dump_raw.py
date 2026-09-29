@@ -59,8 +59,19 @@ def recv_all(sock: socket.socket) -> bytes:
 
 
 def diagnose(raw: bytes) -> None:
-    print(f"总字节数            : {len(raw):,}")
-    print(f"行数                : {raw.count(b'\n') + 1:,}")
+    # ★ 这些量先算成普通变量，**不要写进 f-string 的 {} 里**：
+    #   表达式部分不允许出现反斜杠（b'\n' 这种字节字面量就不行），
+    #   Python 3.12 才放开。盒子是 3.11，写在里面会直接 SyntaxError ——
+    #   这个脚本从 09-23 放上盒子起就一直编译不过，就是踩在这里。
+    n_bytes = len(raw)
+    n_lines = raw.count(b"\n") + 1
+    ends_two_nl = raw.endswith(b"\n\n")
+    ends_frame = raw.endswith(b"#\r\n")
+    closed_by_peer = b"<CONNECTION-CLOSED>" in raw
+    n_nul = raw.count(b"\x00")
+
+    print(f"总字节数            : {n_bytes:,}")
+    print(f"行数                : {n_lines:,}")
 
     try:
         raw.decode("utf-8")
@@ -84,11 +95,11 @@ def diagnose(raw: bytes) -> None:
     if n_close > 1:
         print("                       ⚠️ 收到多个消息帧（客户端把回应拆成多段发）")
 
-    print(f"以两个换行结尾       : {raw.endswith(b'\n\n')}")
+    print(f"以两个换行结尾       : {ends_two_nl}")
     print(f"以 </bts> 结尾       : {raw.rstrip().endswith(b'</bts>')}")
-    print(f"以 # 换行结尾        : {raw.endswith(b'#\r\n')}")
-    print(f"连接被对端关闭       : {b'<CONNECTION-CLOSED>' in raw}")
-    print(f"含 NUL 字节          : {raw.count(b'\x00')}")
+    print(f"以 # 换行结尾        : {ends_frame}")
+    print(f"连接被对端关闭       : {closed_by_peer}")
+    print(f"含 NUL 字节          : {n_nul}")
 
     print("\n--- 开头 500 字符 ---")
     print(raw[:500].decode("utf-8", "replace"))

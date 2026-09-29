@@ -21,9 +21,12 @@ import csv
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from neware_client import (
+    CHARGING_STEPTYPES,
     DEVTYPE_NAMES,
+    DISCHARGING_STEPTYPES,
     NewareClient,
     NewareError,
     STATUS_NAMES,
@@ -31,7 +34,7 @@ from neware_client import (
     build_transport,
     parse_channel,
 )
-from probe import check_time_unit, soh_preview
+from probe import CAP_TO_MAH, group_cycles, soh_preview, check_time_unit
 
 # 明细数据里已知的"标准"字段，其余视为辅助通道
 DF_KNOWN = {
@@ -47,23 +50,27 @@ FIELD_DICT_DF = [
     ("atime", "绝对时间", "—", "真实时刻，时区未知", "待确认时区"),
     ("testtime", "本工步已运行时间", "**毫秒**", "★ 每个工步归零，不是累计", "已用实测数据反推确认"),
     ("volt", "电压", "V", "—", "已确认"),
-    ("curr", "电流", "**mA**", "单位已用 BTSDA 对账确认（协议文档写 A，是错的）。"
+    ("curr", "电流", "**A**", "★ **协议文档写的就是 A，文档没错**"
+     "（BTSDA 显示 mA，是它自己 ×1000 换算过）。"
      "已实测确认：充电为正、放电为负", "已对账确认"),
-    ("cap", "容量", "**mAh**", "★ 是**该工步内**的累计值，不是整圈。"
-     "已用 BTSDA 导出对账确认：原始值 ×1000 即 BTSDA 的 mAh 值", "已对账确认"),
-    ("eng", "能量", "**mWh**", "同上，工步内累计。已用 BTSDA 对账确认", "已对账确认"),
+    ("cap", "容量", "**Ah**", "★ 是**该工步内**的累计值，不是整圈。"
+     "原始值是 Ah：×1000 才等于 BTSDA 显示的 mAh 值", "已对账确认"),
+    ("eng", "能量", "**Wh**", "同上，工步内累计；×1000 得 mWh", "已对账确认"),
 ]
 
 FIELD_DICT_STEP = [
     ("stepindex", "工步序号", "—", "整个测试里的第几步，全局累加，不归零", "已确认"),
     ("stepid", "原始工步号", "—", "循环内的工步号", "已确认"),
-    ("cycleid", "循环号", "—", "—", "已确认"),
+    ("cycleid", "循环号", "—",
+     "★ **不能用来数圈数**：多段「循环」工步的方案下会重复，两圈共用同一个号。"
+     "数圈数请用 summary.md 的 cycle_count（按「一对充放电」重分，和 BTSDA 一致）",
+     "★ 已知不可靠"),
     ("steptype", "工步类型", "—", "—", "已确认"),
     ("steptime", "工步运行时长", "毫秒", "—", "推测与 testtime 同单位"),
     ("startvolt / endvolt", "起止电压", "V", "该工步开始和结束时的电压", "已确认"),
-    ("startcurr / endcurr", "起止电流", "**mA**", "充电为正、放电为负（已实测确认）", "已对账确认"),
-    ("cap", "容量", "**mAh**", "该工步内累计。已用 BTSDA 对账确认", "已对账确认"),
-    ("eng", "能量", "**mWh**", "该工步内累计。已用 BTSDA 对账确认", "已对账确认"),
+    ("startcurr / endcurr", "起止电流", "**A**", "充电为正、放电为负；×1000 得 mA", "已对账确认"),
+    ("cap", "容量", "**Ah**", "该工步内累计；×1000 得 mAh", "已对账确认"),
+    ("eng", "能量", "**Wh**", "该工步内累计；×1000 得 mWh", "已对账确认"),
     ("dcir", "直流内阻", "**毫欧（存疑）**",
      "★ 实测值在 10⁶ 量级。按毫欧算相当于 1000~4400 欧姆；"
      "若实际单位是**微欧**则相当于 1~4.4 欧姆 —— **需专家判断哪个合理**",
@@ -156,29 +163,43 @@ def try_plot(steps: list[dict], detail: list[dict], path: Path) -> tuple[str | N
         except (TypeError, ValueError):
             return None
 
-    # 每圈充/放电容量
-    cycles: dict[int, dict[str, float]] = {}
-    for row in steps:
-        c = to_float(row.get("cycleid"))
-        cap = to_float(row.get("cap")) or 0.0
-        stype = str(row.get("steptype", "")).strip().lower()
-        if c is None:
-            continue
-        b = cycles.setdefault(int(c), {"chg": 0.0, "dis": 0.0, "dcir": None})
-        if stype in ("cc", "cv", "cccv", "pcccv", "cp", "cr", "pulse"):
-            b["chg"] += cap
-        elif stype in ("dc", "dv", "cccd", "dp", "dr"):
-            b["dis"] += cap
-            d = to_float(row.get("dcir"))
-            if d and d > 0:
-                b["dcir"] = d
+    # 每圈充/放电容量。★ 分圈复用 probe.group_cycles，**不按 cycleid** ——
+    # 测试方案有多段「循环」工步时 cycleid 会重复，两圈被并成一圈
+    # （实测 602 圈数成 601，已用 BTSDA 官方导出对照确认）。
+    # 容量原始值是 Ah，这里 ×1000 换成 mAh 显示（与 BTSDA 一致）。
+    blocks = group_cycles(steps)
+    if blocks is None:
+        # 切不出合格的块 → 退回按 cycleid 分组（和以前一样，至少不崩）
+        by_id: dict[int, list[dict[str, Any]]] = {}
+        for row in steps:
+            c = to_float(row.get("cycleid"))
+            if c is not None:
+                by_id.setdefault(int(c), []).append(row)
+        blocks = [by_id[k] for k in sorted(by_id)]
 
-    xs = sorted(cycles)
-    chg = [cycles[c]["chg"] for c in xs]
-    dis = [cycles[c]["dis"] for c in xs]
-    ce = [(cycles[c]["dis"] / cycles[c]["chg"] * 100)
-          if cycles[c]["chg"] else None for c in xs]
-    dcir = [cycles[c]["dcir"] for c in xs]
+    xs: list[int] = []
+    chg: list[float] = []
+    dis: list[float] = []
+    ce: list[float | None] = []
+    dcir: list[float | None] = []
+    for no, rows in enumerate(blocks, start=1):
+        cchg = cdis = 0.0
+        dcur: float | None = None
+        for row in rows:
+            stype = str(row.get("steptype", "")).strip().lower()
+            cap = to_float(row.get("cap")) or 0.0
+            if stype in CHARGING_STEPTYPES:
+                cchg += cap
+            elif stype in DISCHARGING_STEPTYPES:
+                cdis += cap
+                d = to_float(row.get("dcir"))
+                if d and d > 0:
+                    dcur = d
+        xs.append(no)
+        chg.append(cchg * CAP_TO_MAH)
+        dis.append(cdis * CAP_TO_MAH)
+        ce.append((cdis / cchg * 100) if cchg else None)
+        dcir.append(dcur)
 
     with warnings.catch_warnings():
         # 字体缺字会刷几百行警告，这里压掉；已在上面的 L() 里做过兜底
@@ -331,7 +352,7 @@ def build_readme(meta: dict, soh: dict, steps: list[dict],
             f"{stype}（{STEPTYPE_NAMES.get(stype, '未定义')}） | "
             f"{fmt(row.get('startvolt'))}→{fmt(row.get('endvolt'))} V | "
             f"{fmt(row.get('startcurr'))}→{fmt(row.get('endcurr'))} A | "
-            f"{fmt(row.get('cap'))} mAh |")
+            f"{fmt(row.get('cap'))} Ah |")
         shown += 1
     add()
     if len(steps) > shown:
@@ -371,7 +392,7 @@ def build_readme(meta: dict, soh: dict, steps: list[dict],
     add()
     add("| 项 | 值 |")
     add("|---|---|")
-    add("| 活性物质 | **1.184 mg** |")
+    add("| 活性物质 | **1.184 mg**（⚠️ 见下方说明） |")
     add("| 标称比容量 | **120 mAh/g** |")
     add("| 由此推出的理论容量 | **0.142 mAh** |")
     add("| 工步文件 | HK-测试工步.xml |")
@@ -379,6 +400,14 @@ def build_readme(meta: dict, soh: dict, steps: list[dict],
     add("| 循环段电流 | 0.1421 mA（1C） |")
     add("| 电压窗口 | 充电至 3.3 V，放电至 0.5 V |")
     add("| 循环数 | 185 |")
+    add()
+    add("> ⚠️ **「1.184 mg」是某一个样品的值，不是所有通道都一样。**")
+    add("> 它是从测试方案反推的：120 mAh/g × 1.184 mg = 0.142 mAh，")
+    add("> 而方案里「循环段 1C」声明的是 0.1421 mA —— 对**声明了这个电流的那个样品**成立。")
+    add("> 但采集到的数据里**没有质量字段**，所以代码只能拿它去套所有通道。")
+    add("> 实测 27-188-10-1 的电流是 0.284 mA（该样品的 2 倍），")
+    add("> 套 1.184 mg 会算出 799 mAh/g —— 超过任何常见锂电正极的量级，明显不对。")
+    add("> **质量要按测试逐个提供**，否则「比容量」这一列不能用。")
     add()
     add("**1. 活性物质利用率为什么这么低？**")
     add()
