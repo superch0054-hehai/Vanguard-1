@@ -86,6 +86,19 @@ def make_fake_data() -> None:
         "statuses": {"27-188-10-1": "finish"},
     }, ensure_ascii=False), encoding="utf-8")
 
+    # live 区：一个正常的水位文件 + 一个损坏的（坏文件不能拖垮页面）
+    live = DATA / "live" / "channel=27-188-10-2" / "testid=263"
+    live.mkdir(parents=True, exist_ok=True)
+    (live / "progress.json").write_text(json.dumps({
+        "testid": "263", "rows_collected": 4921, "total_on_device": 4921,
+        "updated_at": "2026-09-30T02:00:00",
+    }, ensure_ascii=False), encoding="utf-8")
+    (live / "detail.csv").write_text("seqid,volt,curr\n1,0.4932,0.000284\n",
+                                     encoding="utf-8")
+    bad = DATA / "live" / "channel=27-188-10-3" / "testid=265"
+    bad.mkdir(parents=True, exist_ok=True)
+    (bad / "progress.json").write_text("{ 这不是 JSON", encoding="utf-8")
+
 
 def get(url: str) -> tuple[int, str]:
     try:
@@ -173,6 +186,24 @@ def main() -> int:
         c.ok("17.24" in home, "第二个数据集的保持率也在")
         c.ok("未传完" in home, "未传完的数据集有警示")
         c.ok("心跳" in home, "显示心跳")
+
+        print()
+        print(BAR)
+        print("③b ★ 进行中的测试（每日增量，live 区）")
+        print(BAR)
+        c.ok("进行中的测试" in home, "首页有「进行中的测试」栏目")
+        c.ok("27-188-10-2" in home and "263" in home,
+             "显示了 live 里的通道和测试号")
+        c.ok("4,921" in home or "4921" in home, "显示了已拉行数")
+        c.ok("与正式数据集相互独立" in home,
+             "★ 说明了 live 和正式数据集的关系（口径不掺水）")
+        # 坏的水位文件不能拖垮页面，也不能把坏数据当进度显示
+        c.ok(home.count("进行中的测试") >= 1, "页面正常渲染（坏文件没拖垮它）")
+        import re as _re
+        live_rows = _re.findall(r"<tr><td>(27-188-10-\d)</td><td>(\d+)</td>", home)
+        c.ok(("27-188-10-3", "265") not in live_rows,
+             "★ 损坏的水位条目被跳过（不显示假进度）")
+        c.ok(("27-188-10-2", "263") in live_rows, "正常条目显示了")
 
         print()
         print(BAR)

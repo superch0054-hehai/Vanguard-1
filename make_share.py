@@ -269,6 +269,7 @@ def build_readme(recs: list[dict], generated: str) -> str:
     a("```")
     a("README.md               ← 你正在看的这份")
     a("datasets.md             ← ★ 数据集索引：先看这个，知道有哪些数据")
+    a("live/                   ← ★ 正在跑的测试（每日增量，说明见 live/README.md）")
     a("channel=<通道>/testid=<测试号>/")
     a("    ├── summary.md      ← ★ 该数据集的摘要（指标＋规模＋文件清单）")
     a("    ├── steps.csv       ← 工步层（小，可以直接读）")
@@ -690,6 +691,75 @@ def _head_of(csv_path: Path, n: int) -> str:
 # 主流程
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# live/ —— 进行中测试的每日增量（Agent 也要能看到"昨天测到哪了"）
+# ---------------------------------------------------------------------------
+
+def collect_live_entries(data_dir: Path) -> list[dict]:
+    """读 data/live/ 里各测试的水位文件。坏条目跳过（与 console.live_progress 同规则）。"""
+    out: list[dict] = []
+    live_root = data_dir / "live"
+    if not live_root.is_dir():
+        return out
+    for pj in sorted(live_root.glob("channel=*/testid=*/progress.json")):
+        ch = pj.parts[-3].split("=", 1)[1]
+        tid = pj.parts[-2].split("=", 1)[1]
+        try:
+            d = json.loads(pj.read_text(encoding="utf-8-sig"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if not isinstance(d, dict):
+            continue
+        out.append({"channel": ch, "testid": tid,
+                    "rows": d.get("rows_collected"),
+                    "total": d.get("total_on_device"),
+                    "updated_at": d.get("updated_at")})
+    return out
+
+
+def build_live_md(entries: list[dict], generated: str) -> str:
+    """live/ 区给 Agent 看的说明 —— 它看不见采集器，只能靠这份文件理解 live 是什么。"""
+    L: list[str] = []
+    a = L.append
+    a("# live —— 正在跑的测试（每日增量）")
+    a("")
+    a(f"> 生成时间 {generated}")
+    a("")
+    a("**这是什么**：还没跑完的测试，采集器每天 02:00 自动追加一次明细。")
+    a("**让你不用等电池测完，也能看到它测到哪了。**")
+    a("")
+    a("## 怎么读")
+    a("")
+    a("- `detail.csv` 的**列格式与正式数据集的 detail.csv 完全一致**，")
+    a("  同样是原始口径 **A / Ah / Wh**（显示成 mA/mAh/mWh 要 ×1000），")
+    a("  充电为正、放电为负，`detail.cycleid` 比 `steps.cycleid` 小 1。")
+    a("- `progress.json`：`rows_collected` 是**已拉到第几条**（水位），")
+    a("  `total_on_device` 是设备端总数，`updated_at` 是最近一次追加时间。")
+    a("- 文件**每天都会变长** —— 读的时候以当前文件为准，不要缓存行数。")
+    a("")
+    a("## ★ 和正式数据集的关系")
+    a("")
+    a("本区**只用于观察进行中的趋势**。测试结束后，采集器会做一次完整采集，")
+    a("那才是**正式数据集**（本目录上一级的 `channel=…/testid=…/`，带 summary.md）。")
+    a("**正式结论、给协会的报告一律以正式数据集为准**，不要拿 live 里的数下结论。")
+    a("")
+    a("## 当前有哪些")
+    a("")
+    a("| 通道 | 测试号 | 已拉行数 | 设备端总数 | 最近更新 |")
+    a("|---|---|---|---|---|")
+    if entries:
+        for e in entries:
+            a("| {} | {} | {} | {} | {} |".format(
+                e["channel"], e["testid"],
+                e["rows"] if e["rows"] is not None else "—",
+                e["total"] if e["total"] is not None else "—",
+                e["updated_at"] or "—"))
+    else:
+        a("| （当前没有正在跑的测试） | | | | |")
+    a("")
+    return "\n".join(L) + "\n"
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description="导出给 AI 助手看的共享目录")
     p.add_argument("--data-dir", default="./data", help="采集服务的数据目录")
@@ -740,6 +810,26 @@ def main() -> int:
             (dst / "meta.json").write_text(
                 json.dumps(r, ensure_ascii=False, indent=2, default=str),
                 encoding="utf-8")
+
+    # ---------- 1b. 复制 live 区（进行中测试的每日增量）----------
+    # 为什么共享它：Agent 在容器里只能看到本目录 —— 不把 live 递进来，
+    # 它就永远不知道"昨天测到哪了"（实测它找遍全盘也找不到 data/live/）。
+    live_entries = collect_live_entries(data_dir)
+    live_files = 0
+    if not args.docs_only:
+        for e in live_entries:
+            src = (data_dir / "live" / f"channel={e['channel']}"
+                   / f"testid={e['testid']}")
+            dst = (share_dir / "live" / f"channel={e['channel']}"
+                   / f"testid={e['testid']}")
+            dst.mkdir(parents=True, exist_ok=True)
+            for name in ("detail.csv", "progress.json"):
+                f = src / name
+                if f.is_file():
+                    shutil.copy2(f, dst / name)
+                    live_files += 1
+    print(f"  复制了 {live_files} 个 live 增量文件（进行中的测试，共 "
+          f"{len(live_entries)} 个）")
     print(f"  复制了 {copied} 个数据文件")
 
     # ---------- 2. 生成文档 ----------
@@ -747,6 +837,10 @@ def main() -> int:
         build_readme(recs, generated), encoding="utf-8")
     (share_dir / "datasets.md").write_text(
         build_index(recs, generated, data_dir), encoding="utf-8")
+    live_share = share_dir / "live"
+    live_share.mkdir(parents=True, exist_ok=True)
+    (live_share / "README.md").write_text(
+        build_live_md(live_entries, generated), encoding="utf-8")
     for r in recs:
         src = resolve_dataset_dir(r, data_dir)
         if src is None:

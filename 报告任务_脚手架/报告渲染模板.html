@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>钠离子电池电解液添加剂Q④性能测试分析报告</title>
+<style>
+:root{--paper:#fff;--canvas:#E6E9EE;--ink:#1A1A1A;--ink2:#3D4653;--muted:#6B7280;
+--accent:#1E3A8A;--rule:#9AA3AF;--line:#D6DAE1;--tint:#F4F6F9;
+--font-body:"Noto Serif SC","Source Han Serif SC","SimSun",serif;
+--font-head:"Noto Sans SC","Microsoft YaHei","PingFang SC",sans-serif}
+*{box-sizing:border-box}
+html{background:var(--canvas)}
+body{margin:0;color:var(--ink);font-family:var(--font-body);font-size:11.5pt;line-height:1.9}
+/* 屏幕：像 Word 那样一“页纸”连续滚动 */
+.sheet{width:21cm;margin:0 auto;background:var(--paper);padding:2.5cm 2.2cm 2.2cm;
+box-shadow:0 6px 26px rgba(20,28,44,.16);min-height:29.7cm}
+.doc-title{margin:0 0 6px;font-family:var(--font-head);font-size:22pt;font-weight:800;
+line-height:1.35;letter-spacing:-.01em;text-align:center;color:#111827}
+.doc-sub{margin:0;text-align:center;font-family:var(--font-head);font-size:12.5pt;
+color:var(--ink2);font-weight:500}
+.doc-meta{margin:22px auto 0;max-width:32em;border-top:1px solid var(--line);
+border-bottom:1px solid var(--line);padding:12px 0;font-size:10.5pt;color:var(--ink2);
+display:flex;flex-wrap:wrap;gap:4px 28px;justify-content:center}
+.doc-foot{margin-top:44px;text-align:center;font-size:10pt;color:var(--muted)}
+h1,h2,h3{font-family:var(--font-head);color:#111827;letter-spacing:0}
+h1{font-size:17pt;font-weight:800;margin:2.1em 0 .8em;padding-bottom:6px;
+border-bottom:2px solid var(--accent)}
+h1.first{margin-top:1.2em}
+h2{font-size:13.5pt;font-weight:700;margin:1.7em 0 .6em;color:var(--accent)}
+h3{font-size:12pt;font-weight:700;margin:1.35em 0 .45em;color:var(--ink2)}
+p{margin:0 0 .72em;text-indent:2em;text-align:justify}
+ul{margin:.3em 0 1em;padding-left:2em}
+li{margin:.28em 0;text-align:justify}
+li::marker{color:var(--accent)}
+.note{margin:1.1em 0;padding:12px 16px;background:var(--tint);
+border-left:3px solid var(--accent);font-size:10.5pt;line-height:1.8;text-align:justify}
+figure{margin:1.3em 0 1.6em;text-align:center;break-inside:avoid;page-break-inside:avoid}
+figure img{max-width:100%;height:auto;display:block;margin:0 auto}
+figcaption{margin-top:8px;font-family:var(--font-head);font-size:10pt;color:var(--ink2);
+text-align:center;line-height:1.6}
+.tw{margin:1.2em 0 1.7em;break-inside:avoid;page-break-inside:avoid}
+.tcap{text-indent:0;font-family:var(--font-head);font-size:10pt;color:var(--ink2);
+margin:0 0 6px;text-align:center}
+table{width:100%;border-collapse:collapse;font-family:var(--font-head);font-size:9.5pt}
+thead th{background:var(--tint);font-weight:700;color:#111827;padding:7px 6px;
+border-top:1.3pt solid var(--rule);border-bottom:.7pt solid var(--rule);
+text-align:center;line-height:1.45}
+tbody td{padding:6px;border-bottom:.5pt solid #E8EBF0;color:var(--ink2);line-height:1.5}
+tbody tr:last-child td{border-bottom:1.3pt solid var(--rule)}
+td.l{text-align:left;font-weight:600;color:var(--ink)}
+td.c{text-align:center}
+.toc{margin:0 0 2.4em;padding:16px 20px;background:var(--tint);border:1px solid var(--line)}
+.toc h2{margin:0 0 10px;font-size:12.5pt;color:#111827;border:0;padding:0}
+.toc ul{list-style:none;margin:0;padding:0;font-family:var(--font-head);font-size:10.5pt}
+.toc li.l1{margin:5px 0 2px;font-weight:700}
+.toc li.l1 > ul{padding-left:1.5em;margin-top:2px}
+.toc li.l2{font-weight:400}
+.toc li.l2 a{color:var(--ink2)}
+.toc a{color:var(--ink2);text-decoration:none;display:inline-block;padding:2.5px 0}
+.toc a:hover{color:var(--accent);text-decoration:underline}
+/* 控制条 */
+.controls{position:fixed;left:0;right:0;bottom:0;height:52px;display:flex;align-items:center;
+justify-content:center;gap:10px;background:#fff;border-top:1px solid var(--line);
+font-family:var(--font-head);font-size:13px;z-index:20}
+.controls button{border:1px solid #C7CDD6;background:#fff;color:#1A1A1A;border-radius:6px;
+height:32px;min-width:36px;padding:0 10px;cursor:pointer;font:inherit}
+.controls button:hover{background:var(--tint);border-color:var(--accent)}
+.controls button:disabled{opacity:.4;cursor:not-allowed}
+.controls button:focus-visible,.controls input:focus-visible,.palette-item:focus-visible,
+.palette-search:focus-visible{outline:2px solid #2563EB;outline-offset:2px}
+.controls input{width:min(200px,20vw);accent-color:var(--accent)}
+.counter{font-size:12.5px;min-width:112px;text-align:center;color:var(--ink2);
+font-variant-numeric:tabular-nums}
+.kbd-label{font-size:11px;color:var(--muted)}
+.hint{color:var(--muted);margin-left:4px;white-space:nowrap}
+body{padding-bottom:72px}
+.palette{position:fixed;inset:0;display:none;place-items:start center;padding-top:min(14vh,120px);
+background:rgba(17,24,39,.5);z-index:30}
+.palette.open{display:grid}
+.palette-card{width:min(640px,calc(100vw - 28px));max-height:min(620px,72vh);overflow:hidden;
+background:#fff;border:1px solid #C7CDD6;border-radius:10px;
+box-shadow:0 26px 80px rgba(17,24,39,.3);font-family:var(--font-head)}
+.palette-search{width:100%;border:0;border-bottom:1px solid var(--line);padding:14px;
+font:inherit;font-size:15px;color:var(--ink);outline:2px solid transparent}
+.palette-list{max-height:480px;overflow:auto;padding:6px}
+.palette-item{width:100%;border:0;background:transparent;text-align:left;padding:10px;
+border-radius:6px;display:flex;gap:10px;align-items:baseline;cursor:pointer;font:inherit;
+color:var(--ink)}
+.palette-item:hover,.palette-item.active{background:var(--tint)}
+.palette-item b{font-size:11.5px;color:var(--muted);min-width:30px}
+.palette-item span{font-size:14px;min-width:0;overflow:hidden;text-overflow:ellipsis;
+white-space:nowrap}
+.palette-item small{display:block;color:var(--muted);font-size:11px;line-height:1.5}
+@media(max-width:820px){.sheet{width:auto;padding:20px 16px}
+.controls input,.hint,.command-text{display:none}}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+/* 页边距必须与 render 脚本传给 Chrome 的 margin 完全一致：
+   否则 @page 的 margin:0 会让版面按整页宽排，输出再被裁 20mm，右侧文字被切掉。 */
+@page{size:A4 portrait;margin:16mm 20mm}
+@media print{
+  html{background:#fff}
+  .controls,.palette{display:none!important}
+  .sheet{width:auto;margin:0;padding:0;box-shadow:none;min-height:0}
+  body{font-size:11pt;padding-bottom:0}
+  h1{break-before:page;page-break-before:always}
+  h1.first{break-before:auto;page-break-before:auto}
+  h1,h2,h3{break-after:avoid;page-break-after:avoid}
+  figure,.tw,.note{break-inside:avoid;page-break-inside:avoid}
+  .toc{break-inside:avoid}
+  a{color:inherit;text-decoration:none}
+}
+</style>
+</head>
+<body>
+<main class="sheet" id="doc">
+
+<!-- ============================================================
+     报告渲染模板（BatteryLab）
+     占位符：程序按 ID 替换。双花括号为单值替换；块位注释为整行替换点。
+     块位清单与替换规则见《本地小模型适配版.md》第 5 章。
+     每个块位注释独占一行，程序按其中 ID 整行替换为生成的 HTML 片段。
+     ============================================================ -->
+
+<h1 class="doc-title">{{DOC_TITLE}}</h1>
+<p class="doc-sub">{{DOC_SUBTITLE}}</p>
+<div class="doc-meta">{{DOC_META_SPANS}}</div>
+<div class="note"><b>说明　</b>{{DOC_NOTE}}</div>
+<nav class="toc">
+<h2>目录</h2>
+{{TOC_TREE}}
+</nav>
+
+<!-- ===== 1 实验目的 ===== -->
+<h1 id="sec-1-实验目的" class="first">1  实验目的</h1>
+<h2 id="sec-1-1-整体测试研究目标">1.1  整体测试研究目标</h2>
+<!--BLOCK:S11-->
+<h2 id="sec-1-2-具体实验验证目标">1.2  具体实验验证目标</h2>
+<!--BLOCK:S12-->
+
+<!-- ===== 2 实验方法（全部由程序模板生成，不经模型） ===== -->
+<h1 id="sec-2-实验方法">2  实验方法</h1>
+<h2 id="sec-2-1-测试电池体系与样品制备">2.1  测试电池体系与样品制备</h2>
+<!--BLOCK:S21A-->
+<!--TABLE:1-->
+<!--BLOCK:S21B-->
+<h2 id="sec-2-2-测试仪器与基础环境">2.2  测试仪器与基础环境</h2>
+<!--BLOCK:S22-->
+<h2 id="sec-2-3-核心测试工步">2.3  核心测试工步</h2>
+<!--BLOCK:S23A-->
+<!--TABLE:2-->
+<!--BLOCK:S23B-->
+<h2 id="sec-2-4-整体实验设计方案">2.4  整体实验设计方案</h2>
+<!--BLOCK:S24A-->
+<!--TABLE:3-->
+<!--BLOCK:S24B-->
+
+<!-- ===== 3 实验结果与数据分析 ===== -->
+<h1 id="sec-3-实验结果与数据分析">3  实验结果与数据分析</h1>
+
+<h2 id="sec-3-1-长循环性能分析">3.1  长循环性能分析</h2>
+<!--BLOCK:S31A-->
+<!--FIGURE:1-->
+<!--BLOCK:S31B-->
+<!--TABLE:4-->
+<!--BLOCK:S31C-->
+
+<h2 id="sec-3-2-倍率性能分析">3.2  倍率性能分析</h2>
+<!--BLOCK:S33A-->
+<!--FIGURE:2-->
+<!--BLOCK:S33B-->
+<!--TABLE:5-->
+
+<h2 id="sec-3-3-首圈库伦效率">3.3  首圈库伦效率</h2>
+<!--BLOCK:S32A-->
+<!--FIGURE:3-->
+<!--BLOCK:S32B-->
+<!--TABLE:6-->
+
+<h2 id="sec-3-4-平均电压曲线分析">3.4  平均电压曲线分析</h2>
+<!--BLOCK:S32C-->
+<!--FIGURE:4-->
+<!--BLOCK:S32D-->
+<!--TABLE:7-->
+
+<h2 id="sec-3-5-dQ-dV-曲线分析">3.5  dQ/dV 曲线分析</h2>
+<!--BLOCK:S34A-->
+<!--FIGURE:5-->
+<!--FIGURE:6-->
+<!--BLOCK:S34B-->
+<!--TABLE:8-->
+<!--BLOCK:S34C-->
+
+<h2 id="sec-3-6-多组样品横向对比分析">3.6  多组样品横向对比分析</h2>
+<!--BLOCK:S35A-->
+<!--TABLE:9-->
+<!--BLOCK:S35B-->
+<!--TABLE:10-->
+<!--BLOCK:S35C-->
+
+<!-- ===== 4 实验结论与机制总结 ===== -->
+<h1 id="sec-4-实验结论与机制总结">4  实验结论与机制总结</h1>
+
+<h2 id="sec-4-1-核心电化学性能结论">4.1  核心电化学性能结论</h2>
+<!--BLOCK:S41A-->
+<!--BLOCK:S41B-->
+<!--BLOCK:S41C-->
+<!--BLOCK:S41D-->
+
+<h2 id="sec-4-2-电化学作用机制总结">4.2  电化学作用机制总结</h2>
+<!--BLOCK:S42INTRO-->
+<!--BLOCK:S42A-->
+<!--BLOCK:S42B-->
+<!--BLOCK:S42C-->
+<!--BLOCK:S42D-->
+<!--BLOCK:S42E-->
+
+<h2 id="sec-4-3-后续优化与研究建议">4.3  后续优化与研究建议</h2>
+<!--BLOCK:S43A-->
+<!--BLOCK:S43B-->
+<!--BLOCK:S43C-->
+<!--BLOCK:S43D-->
+
+<!-- ===== 5 总结与展望 ===== -->
+<h1 id="sec-5-总结与展望">5  总结与展望</h1>
+<h2 id="sec-5-1-本次测试工作整体总结">5.1  本次测试工作整体总结</h2>
+<!--BLOCK:S51A-->
+<!--BLOCK:S51B-->
+<!--BLOCK:S51C-->
+<h2 id="sec-5-2-后续研究与应用展望">5.2  后续研究与应用展望</h2>
+<!--BLOCK:S52A-->
+<!--BLOCK:S52B-->
+<!--BLOCK:S52C-->
+<!--BLOCK:S52D-->
+
+<!-- ===== 附录 ===== -->
+<h1 id="sec-附录-预留扩展测试模块">附录  预留扩展测试模块</h1>
+<!--BLOCK:APPENDIX-->
+
+<p class="doc-foot">—— 报告完 ——</p>
+</main>
+<nav class="controls" aria-label="文档导航">
+<button id="prev" aria-label="上一节" title="上一节（← / PageUp）">‹</button>
+<span class="counter" id="counter" aria-live="polite"></span>
+<button id="next" aria-label="下一节" title="下一节（→ / PageDown）">›</button>
+<input id="jump" type="range" min="1" value="1" aria-label="跳转到某一节">
+<button id="command" aria-label="章节索引" title="章节索引（Ctrl+K）"><span class="command-text">索引 </span><span class="kbd-label">Ctrl+K</span></button>
+<button id="fullscreen" aria-label="全屏" title="全屏（F）">⛶</button>
+<button id="print" aria-label="打印" title="打印或存为 PDF（P）">⎙</button>
+<span class="hint">← → 按节跳转 · ↑ ↓ 滚动 · F 全屏 · P 打印</span>
+</nav>
+<div class="palette" id="palette" role="dialog" aria-modal="true" aria-label="章节索引">
+<div class="palette-card">
+<input class="palette-search" id="paletteSearch" type="search" placeholder="输入节号或标题…" aria-label="搜索章节">
+<div class="palette-list" id="paletteList" role="listbox"></div>
+</div>
+</div>
+<script>
+const heads=[...document.querySelectorAll('h1[id],h2[id]')];
+const secs=heads.map(h=>({id:h.id,title:h.textContent.trim(),
+  chapter:(h.previousElementSibling&&h.previousElementSibling.tagName==='H1')
+     ? h.previousElementSibling.textContent.trim() : ''}));
+const counter=document.getElementById('counter'),jump=document.getElementById('jump');
+let current=0;
+const near=()=>{           // 以距视口顶部最近的一节为当前节（滚动联动）
+  let best=0,bd=1e9;
+  heads.forEach((h,i)=>{const d=Math.abs(h.getBoundingClientRect().top-90);
+    if(h.getBoundingClientRect().top<=140&&d<bd){bd=d;best=i}});
+  return best;
+};
+function mark(){
+  current=near();
+  counter.textContent=`第 ${current+1} / ${secs.length} 章·节`;
+  jump.value=String(current+1);
+  document.getElementById('prev').disabled=current===0;
+  document.getElementById('next').disabled=current===secs.length-1;
+}
+function goTo(i,smooth=true){
+  const t=Math.max(0,Math.min(secs.length-1,i));
+  const el=document.getElementById(secs[t].id);
+  window.scrollTo({top:window.scrollY+el.getBoundingClientRect().top-84,
+                   behavior:smooth?'smooth':'auto'});
+  history.replaceState(null,'',`#${secs[t].id}`);
+}
+document.getElementById('prev').addEventListener('click',()=>goTo(current-1));
+document.getElementById('next').addEventListener('click',()=>goTo(current+1));
+jump.max=secs.length;
+jump.addEventListener('input',()=>goTo(Number(jump.value)-1,false));
+document.getElementById('fullscreen').addEventListener('click',()=>
+  document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen());
+document.getElementById('print').addEventListener('click',()=>window.print());
+const palette=document.getElementById('palette'),search=document.getElementById('paletteSearch'),
+      list=document.getElementById('paletteList');
+let pi=0;
+function filtered(){const q=search.value.trim().toLowerCase();
+  return secs.map((s,i)=>({i,...s})).filter(x=>!q||
+    `${x.i+1} ${x.title} ${x.chapter}`.toLowerCase().includes(q))}
+function paint(){
+  const items=filtered();pi=Math.max(0,Math.min(pi,items.length-1));
+  list.innerHTML=items.map((x,k)=>`<button class="palette-item ${k===pi?'active':''}"
+    data-i="${x.i}" role="option" aria-selected="${k===pi}">
+    <b>${String(x.i+1).padStart(2,'0')}</b>
+    <span>${x.title}<small>${x.chapter}</small></span></button>`).join('');
+  list.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
+    goTo(Number(b.dataset.i),false);closePal()}));
+}
+function openPal(){palette.classList.add('open');search.value='';pi=current;paint();
+  requestAnimationFrame(()=>search.focus())}
+function closePal(){palette.classList.remove('open');document.getElementById('command').focus()}
+document.getElementById('command').addEventListener('click',openPal);
+palette.addEventListener('click',e=>{if(e.target===palette)closePal()});
+search.addEventListener('input',()=>{pi=0;paint()});
+search.addEventListener('keydown',e=>{
+  const items=filtered();
+  if(e.key==='ArrowDown'){e.preventDefault();pi=Math.min(items.length-1,pi+1);paint()}
+  else if(e.key==='ArrowUp'){e.preventDefault();pi=Math.max(0,pi-1);paint()}
+  else if(e.key==='Enter'&&items[pi]){e.preventDefault();goTo(items[pi].i,false);closePal()}
+  else if(e.key==='Escape'){e.preventDefault();closePal()}
+});
+window.addEventListener('keydown',e=>{
+  if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){
+    e.preventDefault();palette.classList.contains('open')?closePal():openPal();return}
+  if(palette.classList.contains('open'))return;
+  // 文档语义：← → / PageUp PageDown 按“节”跳转；↑ ↓ 与空格留给正常滚动
+  if(e.key==='ArrowRight'||e.key==='PageDown'){e.preventDefault();goTo(current+1)}
+  else if(e.key==='ArrowLeft'||e.key==='PageUp'){e.preventDefault();goTo(current-1)}
+  else if(e.key==='Home'&&!e.ctrlKey){e.preventDefault();goTo(0)}
+  else if(e.key==='End'&&!e.ctrlKey){e.preventDefault();goTo(secs.length-1)}
+  else if(e.key.toLowerCase()==='f'&&!e.metaKey&&!e.ctrlKey){
+    e.preventDefault();document.getElementById('fullscreen').click()}
+  else if(e.key.toLowerCase()==='p'&&!e.metaKey&&!e.ctrlKey){
+    e.preventDefault();window.print()}
+});
+document.addEventListener('click',e=>{
+  const a=e.target.closest('a[href^="#"]');
+  if(a){const el=document.getElementById(a.getAttribute('href').slice(1));
+    if(el){e.preventDefault();window.scrollTo({top:window.scrollY+
+      el.getBoundingClientRect().top-84,behavior:'smooth'})}}
+});
+let tick=null;
+window.addEventListener('scroll',()=>{if(tick)return;
+  tick=requestAnimationFrame(()=>{mark();tick=null})},{passive:true});
+window.addEventListener('resize',mark);
+mark();
+</script>
+</body>
+</html>

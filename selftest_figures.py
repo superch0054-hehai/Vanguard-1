@@ -10,14 +10,19 @@
     python3 selftest_figures.py
 """
 
+import math
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from figures import (CE_FLOOR_PCT, MASS_G, SP_IMPLAUSIBLE_MAH_G, C_WARN, CycleChart,
-                     ce_never_healthy, cycles_of, fmt_num, nice_ceil, nice_ticks,
-                     sp_implausible)
+from figures import (CE_FLOOR_PCT, CMP_COLORS, MASS_G, SP_IMPLAUSIBLE_MAH_G,
+                     C_WARN, PALETTE_DQDV, CycleChart,
+                     ce_never_healthy, chart_avgv, chart_dqdv, chart_dqdv_sample,
+                     chart_long_cycle, chart_rate, chart_vq, cycles_of,
+                     cycles_of_detail, cycle_rates, dqdv_curve, dqdv_per_cycle,
+                     fmt_num, nice_ceil, nice_ticks, pick_dqdv_cycles,
+                     rates_from_cs, sp_implausible, vq_curves)
 
 BAR = "=" * 66
 
@@ -43,6 +48,443 @@ class Checker:
 
 def step(st: str, cap: float, eng: float, curr: float, dcir: float = 0.0) -> dict:
     return dict(steptype=st, cap=cap, eng=eng, startcurr=curr, dcir=dcir)
+
+
+def test_cycles_of_detail(c: Checker) -> None:
+    """★ 最硬的交叉验证：同一颗合成电芯，从工步层算（cycles_of）和从
+    明细层算（cycles_of_detail）的逐圈指标必须完全一致。
+
+    明细层的 cap 是"工步内累计值"，所以合成时每个工步拆成几条 ramp 行，
+    末条恰好等于工步层的 cap —— 这就是真实明细层的形状（实测 0.5824 mAh 那条）。
+    """
+    # 工步层：两圈两种倍率。圈1 0.2C（2mA），圈2 1C（10mA）—— 标称 10 mAh
+    steps = [step("cc", 0.012, 0.024, 1e-5),
+             step("dc", 0.009, 0.018, -2e-3),
+             step("cc", 0.012, 0.024, 1e-5),
+             step("dc", 0.0085, 0.017, -1e-2)]
+    cs_steps = cycles_of(steps)
+
+    # 明细层：把每个工步拆成 5 条 ramp（cap/eng 从 0 线性长到工步层的值）
+    detail = []
+    seq = 0
+    for si, st_row in enumerate(steps, start=1):
+        n_seg = 5
+        for k in range(1, n_seg + 1):
+            seq += 1
+            f = k / n_seg
+            detail.append(dict(
+                seqid=str(seq),
+                stepid=str(si),
+                cycleid=str((si - 1) // 2),          # 两工步一圈 → detail 圈号 = 工步圈 - 1
+                steptype=st_row["steptype"],
+                testtime=str(k * 1000),
+                atime="2026-10-01 02:00:00",
+                volt=str(2.0 + 0.5 * f),
+                curr=st_row["startcurr"],
+                cap=str(float(st_row["cap"]) * f),
+                eng=str(float(st_row["eng"]) * f),
+                CPU="34.9", dbc="[]"))
+
+    cs_detail = cycles_of_detail(detail)
+
+    c.ok(len(cs_detail) == len(cs_steps) == 2,
+         "圈数一致（2 圈）", f"detail {len(cs_detail)} vs steps {len(cs_steps)}")
+    for a, b in zip(cs_detail, cs_steps):
+        tag = f"第 {a['cycle']} 圈"
+        for key in ("chg", "dis", "ce", "ee", "retention", "chg_eng", "dis_eng"):
+            va, vb = a.get(key), b.get(key)
+            same = (va is None and vb is None) or                    (va is not None and vb is not None and abs(va - vb) <= abs(vb) * 1e-9)
+            c.ok(same, f"★ {tag} 的 {key} 两条路径一致",
+                 f"detail {va} vs steps {vb}")
+    # 平均放电电流：圈 1 的 dc 记录 curr=-2e-3 A → 2 mA；圈 2 → 10 mA
+    c.ok(abs(cs_detail[0]["ma"] - 2.0) < 1e-6, "圈 1 平均放电电流 = 2 mA",
+         str(cs_detail[0]["ma"]))
+    c.ok(abs(cs_detail[1]["ma"] - 10.0) < 1e-6, "圈 2 平均放电电流 = 10 mA",
+         str(cs_detail[1]["ma"]))
+    # 倍率标签：两条路径给出同样的标签
+    r_detail = rates_from_cs(cs_detail, nominal_mah=10.0)
+    r_steps = cycle_rates(steps, nominal_mah=10.0)
+    c.ok([r["label"] for r in r_detail] == [r["label"] for r in r_steps],
+         "★ 两条路径的倍率标签一致",
+         f"{[r['label'] for r in r_detail]} vs {[r['label'] for r in r_steps]}")
+    # 比容量：给质量时两条路径一致
+    d1 = cycles_of_detail(detail, mass_g=MASS_G)
+    s1 = cycles_of(steps, mass_g=MASS_G)
+    c.ok(abs(d1[0]["dis_sp"] - s1[0]["dis_sp"]) <= s1[0]["dis_sp"] * 1e-9,
+         "比容量两条路径也一致")
+    # 退化输入
+    c.ok(cycles_of_detail([]) == [], "空明细 → 空输出")
+    c.ok(cycles_of_detail([{"cycleid": "x", "steptype": "cc"}]) == [],
+         "脏行（圈号非数字）→ 跳过不崩")
+    # 明细层无内阻 → dcir 恒为 None（不能假装有值）
+    c.ok(all(r["dcir_mohm"] is None for r in cs_detail),
+         "明细层口径的 dcir 恒为 None（诚实标注，不假装有内阻）")
+
+    print()
+    print(f"  （合成明细 {len(detail)} 行 ↔ 合成工步 {len(steps)} 行，交叉验证）")
+
+
+def test_report_charts(c: Checker) -> None:
+    """报告的五张**对比图**（两通道一图）。数据全部合成，图型对照五张文献参考图。"""
+    import re
+    import xml.etree.ElementTree as ET
+
+    def valid(svg: str) -> bool:
+        try:
+            ET.fromstring(svg)
+            return True
+        except Exception:
+            return False
+
+    # 两颗容量不同的合成电芯（对比图要有区分度）
+    A = [step("cc", 0.001, 0.002, 1e-5), step("dc", 0.0008, 0.0016, -2e-4),
+         step("cc", 0.001, 0.002, 1e-5), step("dc", 0.0004, 0.0008, -2e-4)]
+    B = [step("cc", 0.0012, 0.0024, 1e-5), step("dc", 0.0009, 0.0018, -1e-3),
+         step("cc", 0.0012, 0.0024, 1e-5), step("dc", 0.00045, 0.0009, -1e-3)]
+    csA, csB = cycles_of(A), cycles_of(B)
+    cells = [{"label": "A", "cs": csA}, {"label": "B", "cs": csB}]
+
+    # ---- ① 长循环对比（左轴=比容量，因为实验要的是这个口径）----
+    fig_sp = chart_long_cycle("t", [{"label": "A", "cs": cycles_of(A, MASS_G)},
+                                    {"label": "B", "cs": cycles_of(B, MASS_G)}],
+                              mass_g=MASS_G)
+    c.ok("放电比容量 (mAh g⁻¹)" in fig_sp.svg(),
+         "① 给质量时左轴是**放电比容量**（用户要求的口径）")
+    vals_sp = [y for x in fig_sp.left_series for y in x["ys"] if y is not None]
+    want = 0.8 / MASS_G          # 放电 0.8 mAh ÷ 1.184 mg ≈ 675.7 mAh/g
+    c.ok(any(abs(v - want) < 0.5 for v in vals_sp),
+         "★ 比容量数值 = 容量÷质量（0.8 mAh ÷ 1.184 mg ≈ 675.7）",
+         f"期望 {want:.1f}，实得 {sorted(set(round(v,1) for v in vals_sp))[:4]}")
+    fig = chart_long_cycle("t", cells)
+    svg = fig.svg()
+    c.ok(valid(svg), "① 长循环对比：合法 SVG")
+    c.ok(len(fig.left_series) == 4, "① 两样品 × 充放 = 4 条左轴曲线",
+         str(len(fig.left_series)))
+    c.ok(len(fig.right_series) == 2, "① 两样品各一条库仑效率（右轴）",
+         str(len(fig.right_series)))
+    cols = [x["color"] for x in fig.left_series]
+    c.ok(cols[0] == cols[1] == CMP_COLORS[0], "① 样品 A 充放同色（第一色=蓝）", str(cols))
+    c.ok(cols[2] == cols[3] == CMP_COLORS[1], "① 样品 B 充放同色（第二色=红）", str(cols))
+    c.ok("A 充电" in svg and "B 放电" in svg and "A 效率" in svg,
+         "① 图例按「样品+充放」命名")
+    fig1 = chart_long_cycle("t", [{"label": "A", "cs": csA}])
+    c.ok(len(fig1.left_series) == 2 and valid(fig1.svg()),
+         "① 只给一个样品 → 也能画（单边对比）")
+
+    # ---- ② 倍率对比 ----
+    rA = [{"cycle": 1, "label": "0.2"}, {"cycle": 2, "label": "0.2"}]
+    rB = [{"cycle": 1, "label": "0.2"}, {"cycle": 2, "label": "0.2"}]
+    fig_sp = chart_rate("t", [{"label": "A", "cs": cycles_of(A, MASS_G), "rates": rA},
+                              {"label": "B", "cs": cycles_of(B, MASS_G), "rates": rB}],
+                        mass_g=MASS_G)
+    c.ok("放电比容量 (mAh g⁻¹)" in fig_sp.svg(), "② 给质量时左轴是放电比容量")
+    fig = chart_rate("t", [{"label": "A", "cs": csA, "rates": rA},
+                           {"label": "B", "cs": csB, "rates": rB}])
+    c.ok(len(fig.left_series) == 2, "② 两样品两条阶梯", str(len(fig.left_series)))
+    c.ok(any(t["text"] == "0.2" for t in fig.texts), "② 倍率标签画上了")
+    c.ok(len(fig.texts) == 1, "★ 倍率标签只标第一份（两份 schedule 相同会重叠）",
+         str(len(fig.texts)))
+    c.ok(valid(fig.svg()), "② 合法 SVG")
+
+    # ---- ③ 首效 V-Q 对比 ----
+    def detail_of(chg_cap, dis_cap):
+        rows_ = []
+        n_ = 0
+        for i in range(4):
+            n_ += 1
+            rows_.append(dict(seqid=str(n_), cycleid="0", steptype="cc",
+                              cap=str(chg_cap * i / 3), volt=str(2.5 + 0.8 * i / 3),
+                              curr="1e-5", eng="0"))
+        for i in range(4):
+            n_ += 1
+            rows_.append(dict(seqid=str(n_), cycleid="0", steptype="dc",
+                              cap=str(dis_cap * i / 3), volt=str(3.3 - 0.8 * i / 3),
+                              curr="-1e-5", eng="0"))
+        return rows_
+
+    curA = vq_curves(detail_of(0.001, 0.0008), cycle=1)
+    curB = vq_curves(detail_of(0.0012, 0.0009), cycle=1)
+    fig = chart_vq("t", [{"label": "A", "curves": curA},
+                         {"label": "B", "curves": curB}])
+    svg = fig.svg()
+    c.ok(len(fig.left_series) == 4, "③ 两样品 × 充放 = 4 条 V-Q 曲线",
+         str(len(fig.left_series)))
+    c.ok("A 充电（ICE 80.00%）" in svg, "③ 图例各标 ICE（A=80%）")
+    c.ok("B 充电（ICE 75.00%）" in svg, "③ 图例各标 ICE（B=75%）")
+    c.ok(valid(svg), "③ 合法 SVG")
+
+    # ---- ④ 平均电压对比 ----
+    fig = chart_avgv("t", cells)
+    c.ok(len(fig.left_series) == 4, "④ 两样品 × 充放 = 4 条平均电压线",
+         str(len(fig.left_series)))
+    vals = [y for x in fig.left_series for y in x["ys"] if y is not None]
+    c.ok(all(abs(v - 2.0) < 1e-9 for v in vals),
+         "④ 平均电压 = 能量÷容量（合成数据全为 2.0 V）", str(vals))
+    c.ok(valid(fig.svg()), "④ 合法 SVG")
+
+    # ---- ⑤ dQ/dV 对比 ----
+    def dq_of(scale):
+        pts = []
+        q = 0.0
+        v = 3.0
+        while v <= 3.5:
+            dq = (100 + 400 * math.exp(-((v - 3.25) ** 2) / (2 * 0.01 ** 2))) * scale
+            q += dq * 0.001
+            pts.append((q, v))
+            v += 0.001
+        return pts
+
+    dqA = dqdv_curve(dq_of(1.0), bin_v=0.005, smooth=3)
+    dqB = dqdv_curve(dq_of(1.2), bin_v=0.005, smooth=3)
+    fig = chart_dqdv("t", [{"label": "A", "curves": {1: dqA}},
+                           {"label": "B", "curves": {1: dqB}}])
+    svg = fig.svg()
+    c.ok(len(fig.left_series) == 2, "⑤ 两样品各一条 dQ/dV", str(len(fig.left_series)))
+    c.ok("A 第1圈" in svg and "B 第1圈" in svg, "⑤ 图例带样品名+圈号")
+    c.ok(valid(svg), "⑤ 合法 SVG")
+    vmax, _ = max(dqA, key=lambda t: t[1])
+    c.ok(3.22 <= vmax <= 3.28, "⑤ 缩放样品的峰位仍在 V=3.25 附近", f"{vmax:.3f}")
+
+    # ---- X 轴刻度策略：连续量轴（容量/电压）不能退化成只有一个刻度 ----
+    # ★ 实测的 bug：刻度策略原来只看"跨度 ≤ 12"就按整数画，容量轴（0~0.63 mAh）
+    #   与电压轴（0.5~1.1 V）跨度也小，于是生成 [0,1,2] 再被范围过滤砍到只剩一个刻度。
+    def xticks_of(svg: str) -> list[str]:
+        return re.findall(r'<text x="[\d.]+" y="49[0-9.]+"[^>]*>([^<]*)</text>', svg)
+
+    t_vq = xticks_of(fig_vq.svg() if 'fig_vq' in dir() else
+                     chart_vq("t", [{"label": "A", "curves": curA}]).svg())
+    c.ok(len(t_vq) >= 5, "★ 容量轴（V-Q）有足够刻度，不是只剩一个",
+         str(t_vq))
+    c.ok(any("." in x for x in t_vq), "★ 容量轴刻度是连续值（0.1 / 0.2 这种）",
+         str(t_vq))
+    dqF = chart_dqdv("t", [{"label": "A", "curves": {1: dqA}}])
+    t_dq = xticks_of(dqF.svg())
+    c.ok(len(t_dq) >= 3, "★ 电压轴（dQ/dV）有足够刻度",
+         str(t_dq))
+    t_cyc = xticks_of(chart_long_cycle("t", [{"label": "A", "cs": csA}]).svg())
+    c.ok(t_cyc == ["1", "2"], "★ 循环号轴仍是整数刻度（没被改坏）", str(t_cyc))
+    dense_xs = list(range(1, 577))
+    dense_cs = [dict(cycle=i, chg=1.0, dis=0.6, ce=99.0, ee=90.0,
+                     chg_eng=2.0, dis_eng=1.2, retention=100.0, dcir_mohm=None)
+                for i in dense_xs]
+    t_dense = xticks_of(chart_long_cycle("t", [{"label": "A", "cs": dense_cs}]).svg())
+    c.ok(len(t_dense) >= 4 and all("." not in x for x in t_dense),
+         "★ 576 圈仍是整数整刻度（100/200/…）", str(t_dense))
+
+    # ---- 退化输入 ----
+    c.ok(chart_long_cycle("空", []).svg().startswith("<svg"),
+         "空样品集 → 也能渲染（不崩）")
+    c.ok(chart_vq("空", [{"label": "A", "curves": {}}]).svg().startswith("<svg"),
+         "V-Q 空曲线 → 也能渲染")
+    c.ok(chart_dqdv("空", [{"label": "A", "curves": {}}]).svg().startswith("<svg"),
+         "dQ/dV 空曲线 → 也能渲染")
+
+
+def test_dqdv_multi(c: Checker) -> None:
+    """dQ/dV **逐圈图**（报告的图 5/6）：一个样品一张、氧化+还原同图、按圈号配色。
+
+    钉住三件事：① 请求的圈还没到就退回"已有的圈"，并把缺的圈原样报出来；
+    ② 取圈必须 exact —— 缺的圈绝不能拿第 1 圈顶上（图上多一条假曲线，肉眼看不出来）；
+    ③ 符号口径：还原（嵌入/放电）画成正峰（与提示词 S34A 那句"正峰为还原"一致）。
+    """
+    import xml.etree.ElementTree as ET
+
+    def valid(svg: str) -> bool:
+        try:
+            ET.fromstring(svg)
+            return True
+        except Exception:
+            return False
+
+    # ---- ① 圈的选择 ----
+    drawn, missing = pick_dqdv_cycles([1, 10, 50, 100, 200, 300], [1, 2, 3])
+    c.ok(drawn == [1, 2, 3], "★ 请求的圈只到手第 1 圈 → 退回到已有的 1/2/3 圈", str(drawn))
+    c.ok(missing == [10, 50, 100, 200, 300], "★ 缺的圈照实报出来（图注写「尚未到达」）",
+         str(missing))
+    drawn, missing = pick_dqdv_cycles([1, 10, 50], [1, 2, 10, 50])
+    c.ok(drawn == [1, 10, 50] and missing == [],
+         "请求的圈到手 ≥2 个 → 就按请求的画，不掺没请求的圈", f"{drawn} / {missing}")
+    drawn, missing = pick_dqdv_cycles([1, 10], [])
+    c.ok(drawn == [] and missing == [1, 10], "一条数据都没有 → 不画，全报缺",
+         f"{drawn} / {missing}")
+    drawn, _ = pick_dqdv_cycles([1, 10, 50, 100, 200, 300], list(range(1, 20)))
+    c.ok(drawn == [1, 10],
+         "★ 请求里已有 2 个圈到手（1、10）→ 只画请求的，不把 19 个圈全画上", str(drawn))
+    drawn, _ = pick_dqdv_cycles([1, 10, 50, 100, 200, 300], list(range(1, 10)))
+    c.ok(drawn == list(range(1, 7)),
+         "★ 退回到已有圈时封顶 6 个（配色就 6 档，多了颜色会重复）", str(drawn))
+
+    # ---- ② 逐圈算 dQ/dV：必须 exact 取圈 ----
+    def detail_cycle(cid, chg_cap, dis_cap):
+        rows_ = []
+        for i in range(4):
+            rows_.append(dict(seqid=str(cid * 10 + i), cycleid=str(cid), steptype="cc",
+                              cap=str(chg_cap * i / 3), volt=str(2.5 + 0.8 * i / 3),
+                              curr="1e-5", eng="0"))
+        for i in range(4):
+            rows_.append(dict(seqid=str(cid * 10 + 4 + i), cycleid=str(cid), steptype="dc",
+                              cap=str(dis_cap * i / 3), volt=str(3.3 - 0.8 * i / 3),
+                              curr="-1e-5", eng="0"))
+        return rows_
+
+    rows = detail_cycle(0, 0.001, 0.0008) + detail_cycle(1, 0.001, 0.0006)
+    dm = dqdv_per_cycle(rows, [1, 2, 99])
+    c.ok(sorted(dm) == [1, 2],
+         "★ 只算真实存在的圈：第 99 圈不画（**不回退到第 1 圈**）", str(sorted(dm)))
+    c.ok(all(dm[cy]["chg"] and dm[cy]["dis"] for cy in dm), "每圈都给充、放两个分支")
+    c.ok(dqdv_per_cycle(rows, [99]) == {}, "只请求不存在的圈 → 空（宁缺勿假）")
+    c.ok(vq_curves(rows, cycle=99, exact=True) is None,
+         "★ exact 取圈：没有就返回 None（老行为会回退到第 1 圈）")
+    c.ok(vq_curves(rows, cycle=99) is not None,
+         "非 exact 时仍保留「回退到第 1 圈」的老行为（别把老路径改坏）")
+
+    # ---- ③ 图：充放同图、图例=圈号、还原为正 ----
+    fig = chart_dqdv_sample("A　（dQ/dV）", {"label": "A", "dqdv_multi": dm})
+    svg = fig.svg()
+    c.ok(valid(svg), "☆ 逐圈 dQ/dV 图：合法 SVG")
+    c.ok(len(fig.left_series) == 4, "★ 2 圈 × 充放 = 4 条曲线画在同一张图里",
+         str(len(fig.left_series)))
+    c.ok(sum(1 for s in fig.left_series if s["label"]) == 2,
+         "★ 图例只挂一份/圈（不是充放各一份，否则 6 圈就 12 行）",
+         str([s["label"] for s in fig.left_series]))
+    c.ok("第 1 圈" in svg and "第 2 圈" in svg, "图例写的是圈号")
+    cols = [s["color"] for s in fig.left_series]
+    c.ok(cols[0] == cols[1] == PALETTE_DQDV[0] and cols[2] == cols[3] == PALETTE_DQDV[1],
+         "同一圈充放同色、不同圈用梯度色", str(cols))
+    c.ok("电压 (V)" in svg, "★ X 轴仍是电压（dQ/dV 的横轴本来就是电压）")
+    chg_ys = fig.left_series[0]["ys"]
+    dis_ys = fig.left_series[1]["ys"]
+    c.ok(max(chg_ys) <= 0 and min(dis_ys) >= 0,
+         "★ 符号口径：还原（嵌入/放电）为正峰、氧化（脱出/充电）为负峰",
+         f"充满峰 max={max(chg_ys):.3f}，放满峰 min={min(dis_ys):.3f}")
+    fig_raw = chart_dqdv_sample("A", {"label": "A", "dqdv_multi": dm},
+                                reduction_positive=False)
+    c.ok(max(fig_raw.left_series[1]["ys"]) <= 0 and min(fig_raw.left_series[0]["ys"]) >= 0,
+         "reduction_positive=False 时符号翻回去（留一个一行回退的开关）")
+
+    # ---- ④ 缺圈的图注确实写进了图里 ----
+    drawn, missing = pick_dqdv_cycles([1, 10, 50, 100, 200, 300], [1, 2])
+    fig2 = chart_dqdv_sample("A", {"label": "A", "dqdv_multi": dqdv_per_cycle(rows, drawn)})
+    fig2.set_notes(["已画圈：第 1 圈、第 2 圈",
+                    "⚠ 尚未到达的圈：第 10 圈、第 50 圈、第 100 圈、第 200 圈、第 300 圈"])
+    s2 = fig2.svg()
+    c.ok("尚未到达" in s2 and "第 300 圈" in s2, "★ 缺的圈写进了图注（够不够得着要看得见）")
+    c.ok(valid(s2), "带缺圈标注的图仍是合法 SVG")
+
+    # ---- ⑤b 配色必须互相分得开 + 负值峰不许贴着轴底 ----
+    # ★ 第一版逐圈配色是一片橙黄渐变色（#ffd54f/#ffc107/#ffb300…），
+    #   渲染出来三条曲线肉眼分不出谁是谁 —— "按圈号配色"等于没做。
+    def rgb(h):
+        return tuple(int(h[i:i + 2], 16) for i in (1, 3, 5))
+
+    def dist(a, b):
+        return max(abs(x - y) for x, y in zip(rgb(a), rgb(b)))
+
+    worst = min(dist(a, b) for i, a in enumerate(PALETTE_DQDV)
+                for b in PALETTE_DQDV[i + 1:])
+    c.ok(worst >= 40, "★ 逐圈配色的任意两色至少差 40（肉眼分得开）", f"最接近的一对只差 {worst}")
+    c.ok(len(set(PALETTE_DQDV)) == len(PALETTE_DQDV), "配色没有重复值")
+
+    # 负值峰的轴底：数据到 -8，轴底要落到 -8 以下（贴边 = 看着像被切掉）
+    f_neg = CycleChart("t", "L", "R")
+    f_neg.add_left([1, 2, 3], [-8.0, -1.0, 0.0], "a")
+    (x0_, x1_), (ly0_, ly1_), _r = f_neg._ranges()
+    c.ok(ly0_ < -8.0, "★ 数据最小 -8 → 轴底下探到 -8 以下（峰尖不贴边框）", f"轴底 {ly0_}")
+    c.ok(ly1_ >= 0.0 > ly0_, "有负值时轴仍跨过 0（正负峰能同框比较）")
+
+    # ---- ⑥ 指定刻度（"X 轴就标 1/10/50/100/200/300" 用得上）----
+    import re as _re
+
+    def ticks_of(s: str) -> list[str]:
+        return _re.findall(r'<text x="[\d.]+" y="49[0-9.]+"[^>]*>([^<]*)</text>', s)
+
+    cs5 = [dict(cycle=i, chg=1.0, dis=0.9, ce=90.0, ee=90.0, chg_eng=2.0,
+                dis_eng=1.8, retention=100.0, dcir_mohm=None) for i in range(1, 6)]
+    f_in = chart_long_cycle("t", [{"label": "A", "cs": cs5}])
+    f_in.set_xticks([1, 10, 50, 100, 200, 300])
+    c.ok(ticks_of(f_in.svg()) == ["1"],
+         "★ 默认不撑轴：只有 1 落在数据范围内，就只画 1（曲线不会被挤成一团）",
+         str(ticks_of(f_in.svg())))
+    f_sp = chart_long_cycle("t", [{"label": "A", "cs": cs5}])
+    f_sp.set_xticks([1, 10, 50, 100, 200, 300], span=True)
+    got = ticks_of(f_sp.svg())
+    c.ok(got == ["1", "10", "50", "100", "200", "300"],
+         "span=True 时轴撑到 300 圈，六个刻度全画上", str(got))
+
+
+def test_legend_clear(c: Checker) -> None:
+    """图例落位的回归测试：**任何一条曲线线段都不许穿过图例框**。
+
+    钉住的具体 bug：只有 2 圈时顶点全在画面左右边缘、候选框内缩 8px 一个都框不住，
+    六个候选全得 0 分，min() 按顺序取了右上角 —— 而两点连成的直线横扫整幅图，
+    正好从框里穿过（用户实测的遮挡）。修法：命中计分把**线段**也算上。
+    """
+    import re
+    import figures as F
+
+    # ---- 辅助函数本身的断言 ----
+    for args, want, name in [
+        ((0, 0, 100, 100, 40, 40, 20, 20), True, "斜穿框"),
+        ((0, 0, 10, 10, 40, 40, 20, 20), False, "两头都在框外"),
+        ((50, 50, 80, 80, 40, 40, 20, 20), True, "整段在框内"),
+        ((50, 40, 80, 40, 40, 40, 20, 20), True, "擦上边"),
+        ((50, 10, 80, 10, 40, 40, 20, 20), False, "平行且在外"),
+        ((60, -10, 60, 60, 40, 40, 20, 20), True, "竖线穿过框"),
+    ]:
+        c.ok(F._seg_hits_rect(*args) is want, f"线段-矩形相交：{name}")
+
+    # ---- 不变量：图例框不许被任何线段穿过 ----
+    def legend_rect(svg: str):
+        m = re.search(r'<rect x="([\d.-]+)" y="([\d.-]+)" width="([\d.-]+)" '
+                      r'height="([\d.-]+)" rx="7" fill="#ffffff" fill-opacity="0.85"', svg)
+        return tuple(float(g) for g in m.groups()) if m else None
+
+    def check(chart, label: str) -> None:
+        svg = chart.svg()
+        r = legend_rect(svg)
+        if r is None:
+            c.ok(False, label, "SVG 里找不到图例框")
+            return
+        bx, by, bw, bh = r
+        (x0, x1), (ly0, ly1), (ry0, ry1) = chart._ranges()
+        px0, px1 = chart.ML, chart.W - chart.MR
+        py0, py1 = chart.H - chart.MB, chart.MT
+        sx = lambda v: px0 + (v - x0) / (x1 - x0) * (px1 - px0)
+        sly = lambda v: py0 - (v - ly0) / (ly1 - ly0) * (py0 - py1)
+        sry = lambda v: py0 - (v - ry0) / (ry1 - ry0) * (py0 - py1)
+        bad = 0
+        for s_ in chart.left_series:
+            pts = [(sx(x), sly(y)) for x, y in zip(s_["xs"], s_["ys"]) if y is not None]
+            bad += sum(1 for a, b in zip(pts, pts[1:])
+                       if F._seg_hits_rect(a[0], a[1], b[0], b[1], bx, by, bw, bh))
+        for s_ in chart.right_series:
+            pts = [(sx(x), sry(y)) for x, y in zip(s_["xs"], s_["ys"]) if y is not None]
+            bad += sum(1 for a, b in zip(pts, pts[1:])
+                       if F._seg_hits_rect(a[0], a[1], b[0], b[1], bx, by, bw, bh))
+        c.ok(bad == 0, label, f"{bad} 条线段穿过图例框（框 {r}）")
+
+    # 情形一：**2 圈**（就是用户截图里那张平均电压图的形状）—— 最容易压线的场景
+    csA = cycles_of([step("cc", 0.001, 0.002, 1e-5), step("dc", 0.0008, 0.0016, -1e-5),
+                     step("cc", 0.001, 0.002, 1e-5), step("dc", 0.0004, 0.0008, -1e-5)])
+    csB = cycles_of([step("cc", 0.0012, 0.0024, 1e-5), step("dc", 0.0009, 0.0018, -1e-5),
+                     step("cc", 0.0012, 0.0024, 1e-5), step("dc", 0.00045, 0.0009, -1e-5)])
+    check(chart_avgv("2 圈", [{"label": "A", "cs": csA}, {"label": "B", "cs": csB}]),
+          "★ 2 圈的平均电压对比图：图例没压线")
+    check(chart_long_cycle("2 圈", [{"label": "A", "cs": csA}, {"label": "B", "cs": csB}]),
+          "★ 2 圈的长循环对比图：图例没压线")
+
+    # 情形二：密集点（576 圈）—— 不能为了修小数据把大数据搞坏
+    xs = list(range(1, 577))
+    dense = [{"label": "A", "cs": [dict(cycle=i, chg=1.0, dis=0.6 - i * 0.0002,
+                                        ce=99.0, ee=90.0, chg_eng=2.0, dis_eng=1.2,
+                                        retention=100.0, dcir_mohm=None)
+                                   for i in xs]}]
+    check(chart_long_cycle("576 圈", dense), "★ 576 圈的长循环图：图例没压线")
+
+    # 情形三：只有 1 圈（退化）也不能崩
+    one = [{"label": "A", "cs": cycles_of([step("cc", 0.001, 0.002, 1e-5),
+                                           step("dc", 0.0008, 0.0016, -1e-5)])}]
+    check(chart_long_cycle("1 圈", one), "★ 1 圈（退化）：图例没压线")
 
 
 def main() -> int:
@@ -297,6 +739,30 @@ def main() -> int:
         c.ok(True, "★ 输出能被标准 XML 解析器解析（合法 SVG）")
     except Exception as e:
         c.ok(False, "输出能被标准 XML 解析器解析（合法 SVG）", str(e))
+
+    print()
+    print(BAR)
+    print("⑧ 报告参考图：六张图（长循环/首效VQ/平均电压/倍率/dQdV×2）")
+    print(BAR)
+    test_report_charts(c)
+
+    print()
+    print(BAR)
+    print("⑧b ★ dQ/dV 逐圈图：每样品一张、充放同图、缺圈如实标注、exact 取圈")
+    print(BAR)
+    test_dqdv_multi(c)
+
+    print()
+    print(BAR)
+    print("⑨ ★ live 数据源：cycles_of_detail（明细层口径）与 cycles_of 交叉验证")
+    print(BAR)
+    test_cycles_of_detail(c)
+
+    print()
+    print(BAR)
+    print("⑩ ★ 图例不压曲线（原来只数「点」不数「线」，两点直线会横扫整幅图）")
+    print(BAR)
+    test_legend_clear(c)
 
     print()
     print(BAR)

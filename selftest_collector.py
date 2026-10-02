@@ -116,6 +116,9 @@ class Checker:
         self.passed = 0
         self.failed: list[str] = []
 
+    def eq(self, got, want, label: str) -> None:
+        self.ok(got == want, label, f"得到 {got!r}，期望 {want!r}")
+
     def ok(self, cond: bool, label: str, extra: str = "") -> None:
         if cond:
             self.passed += 1
@@ -147,6 +150,123 @@ def make_collector(fake: FakeTransport, settle: float = 0.0) -> C.Collector:
     col.channels = [C.parse_channel("27-188-10-2")]
     col.collected = set()
     return col
+
+
+def test_incremental(c: Checker) -> None:
+    """每日增量读取的离线测试 —— live 区、水位、边界全在这里。"""
+    import csv as _csv
+
+    def live_csv_rows(p: Path) -> int:
+        if not p.exists():
+            return 0
+        with p.open(encoding="utf-8-sig", newline="") as fh:
+            return sum(1 for _ in _csv.reader(fh)) - 1     # 去掉表头
+
+    # ---- 第 1 轮：从 0 拉 ----
+    fake = FakeTransport()
+    fake.status = "working"
+    fake.complete = False            # 测试还在跑
+    fake.uploaded = 30
+    fake.detail_rows = 30
+    col = make_collector(fake)
+    col.last_status = {"27-188-10-2": "working"}
+
+    added = col.incremental_pass(col.channels)
+    c.eq(added, 30, "第 1 轮：从 0 拉到 30，新增 30 行")
+    d = col.live_dir(col.channels[0], TESTID)
+    c.ok((d / "detail.csv").exists(), "live detail.csv 落盘了")
+    c.eq(live_csv_rows(d / "detail.csv"), 30, "live 文件里 30 行数据")
+    prog = json.loads((d / "progress.json").read_text(encoding="utf-8-sig"))
+    c.eq(prog["rows_collected"], 30, "★ 水位记到了 30")
+    c.eq(prog["testid"], TESTID, "水位记着测试号")
+    c.ok("total_on_device" in prog, "水位里记了设备端总数（下次对比用）")
+
+    # ---- 第 2 轮：只拉新增 ----
+    n_dl_before = fake.calls.count("download")
+    fake.uploaded = 45
+    fake.detail_rows = 45
+    added = col.incremental_pass(col.channels)
+    c.eq(added, 15, "★ 第 2 轮：只拉新增的 15 行（不是从头重拉）")
+    c.eq(fake.calls.count("download") - n_dl_before, 1,
+         "只发了一次 download（分块没拆多余的）")
+    prog = json.loads((d / "progress.json").read_text(encoding="utf-8-sig"))
+    c.eq(prog["rows_collected"], 45, "水位推进到 45")
+    c.eq(live_csv_rows(d / "detail.csv"), 45, "文件里 45 行（30 旧 + 15 新，无重复）")
+
+    # ---- 第 3 轮：没涨 → 什么都不做 ----
+    n_dl_before = fake.calls.count("download")
+    added = col.incremental_pass(col.channels)
+    c.eq(added, 0, "没有新增 → 0 行")
+    c.eq(fake.calls.count("download") - n_dl_before, 0, "★ 没涨就一次 download 都不发")
+
+    # ---- 第 4 轮：count 比水位还小 → 拒绝（宁缺勿乱）----
+    fake.uploaded = 10
+    before = live_csv_rows(d / "detail.csv")
+    added = col.incremental_pass(col.channels)
+    c.eq(added, 0, "★ count 回退 → 拒绝拉取，0 行")
+    c.eq(live_csv_rows(d / "detail.csv"), before, "live 文件没被写乱")
+    prog = json.loads((d / "progress.json").read_text(encoding="utf-8-sig"))
+    c.eq(prog["rows_collected"], 45, "水位也没动")
+
+    # ---- 第 5 轮：传完了 → 跳过（正式采集会接住）----
+    fake.uploaded = 60
+    fake.detail_rows = 60
+    fake.complete = True
+    n_dl_before = fake.calls.count("download")
+    added = col.incremental_pass(col.channels)
+    c.eq(added, 0, "★ 已传完的测试 → 跳过（等正式采集）")
+    c.eq(fake.calls.count("download") - n_dl_before, 0, "没发 download")
+
+    # ---- 第 6 轮：换了测试号 → 另起新文件、水位清零 ----
+    fake.testid = "266"
+    fake.complete = False
+    fake.uploaded = 20
+    fake.detail_rows = 20
+    added = col.incremental_pass(col.channels)
+    c.eq(added, 20, "换了测试号 → 从 0 拉 20 行")
+    d2 = col.live_dir(col.channels[0], "266")
+    c.ok((d2 / "detail.csv").exists(), "新测试有自己独立的 live 目录")
+    prog2 = json.loads((d2 / "progress.json").read_text(encoding="utf-8-sig"))
+    c.eq(prog2["rows_collected"], 20, "新测试的水位从 20 开始（与旧测试无关）")
+    c.eq(live_csv_rows(d / "detail.csv"), 45, "旧测试的 live 文件原封不动")
+
+    # ---- 第 7 轮：水位文件坏了 → 拒绝（不能从头重拉造成重复）----
+    (d2 / "progress.json").write_text("{ 这不是 JSON", encoding="utf-8")
+    fake.uploaded = 25
+    fake.detail_rows = 25
+    before = live_csv_rows(d2 / "detail.csv")
+    added = col.incremental_pass(col.channels)
+    c.eq(added, 0, "★ 水位损坏 → 拒绝拉取（绝不从头重拉造成重复行）")
+    c.eq(live_csv_rows(d2 / "detail.csv"), before, "文件没被写乱")
+
+    # ---- 列格式与正式 detail.csv 一致（口径断言）----
+    fake2 = FakeTransport()
+    fake2.status = "finish"
+    col2 = make_collector(fake2)
+    col2.collect(col2.channels[0])
+    official = OUT / f"channel=27-188-10-2/testid={TESTID}/detail.csv"
+    live = d / "detail.csv"
+    if official.exists():
+        head = lambda p: p.open(encoding="utf-8-sig", newline="").readline().strip()
+        c.eq(head(live), head(official), "★ live 的列格式与正式 detail.csv 完全一致")
+
+    # ---- BOM 只在文件头出现一次（utf-8-sig 的 append 坑）----
+    raw = live.read_bytes()
+    BOM = b"\xef\xbb\xbf"
+    c.ok(raw.startswith(BOM), "live 文件头带 BOM（Excel 打开不乱码）")
+    c.eq(raw.count(BOM), 1, "★ 追加没有再塞 BOM 进文件中间")
+
+    # ---- 调度：下次时间点的算法 ----
+    from datetime import datetime as _dt
+    n1 = col._next_incremental_time(_dt(2026, 9, 29, 23, 30))
+    c.ok(n1 == _dt(2026, 9, 30, 2, 0), "23:30 → 明天 02:00")
+    n2 = col._next_incremental_time(_dt(2026, 9, 29, 1, 0))
+    c.ok(n2 == _dt(2026, 9, 29, 2, 0), "01:00 → 今天 02:00（还没到）")
+    n3 = col._next_incremental_time(_dt(2026, 9, 29, 2, 0))
+    c.ok(n3 == _dt(2026, 9, 30, 2, 0), "正好 02:00 → 明天（今天已经跑过）")
+
+    print()
+    print(f"  （live 区结构：{d.parent}）")
 
 
 def main() -> int:
@@ -239,6 +359,12 @@ def main() -> int:
     dt = _t.monotonic() - t0
     c.ok(got is False, "返回 False（跳过了）")
     c.ok(dt < 3.0, f"耗时 {dt:.1f}s < 3s（没白等 8s 的 settle）")
+
+    print()
+    print(BAR)
+    print("⑦ 每日增量读取（live 区）—— 不等测试结束也能拿数据")
+    print(BAR)
+    test_incremental(c)
 
     print()
     print(BAR)

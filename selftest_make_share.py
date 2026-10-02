@@ -116,6 +116,23 @@ def make_fake_data() -> None:
         "\n".join(json.dumps(r, ensure_ascii=False) for r in recs) + "\n",
         encoding="utf-8")
 
+    # live 区：进行中测试的每日增量。一个正常水位 + 一个损坏的
+    # （坏文件必须被跳过 —— 不能拖垮共享，更不能把坏数据当进度共享出去）
+    live = DATA / "live" / "channel=27-188-10-2" / "testid=263"
+    live.mkdir(parents=True, exist_ok=True)
+    (live / "detail.csv").write_text(
+        "seqid,stepid,cycleid,steptype,testtime,atime,volt,curr,cap,eng,CPU,dbc\n"
+        "1,1,1,cc,1000,2026-09-30 02:00:00,1.919,0,0,0,34.9,[]\n",
+        encoding="utf-8")
+    (live / "progress.json").write_text(json.dumps({
+        "testid": "263", "rows_collected": 6597, "total_on_device": 6597,
+        "updated_at": "2026-10-01T02:00:16",
+    }, ensure_ascii=False), encoding="utf-8")
+    bad = DATA / "live" / "channel=27-188-10-3" / "testid=265"
+    bad.mkdir(parents=True, exist_ok=True)
+    (bad / "detail.csv").write_text("seqid\n", encoding="utf-8")
+    (bad / "progress.json").write_text("{ 这不是 JSON", encoding="utf-8")
+
 
 class Checker:
     def __init__(self):
@@ -345,6 +362,41 @@ def main() -> int:
                         capture_output=True, text=True)
     c.ok(r2.returncode != 0, "目录非空时拒绝执行")
     c.ok("--force" in (r2.stderr + r2.stdout), "提示了 --force")
+
+    print()
+    print(BAR)
+    print("⑥ live 区共享：Agent 也要能看到「昨天测到哪了」")
+    print(BAR)
+    live_share = SHARE / "live" / "channel=27-188-10-2" / "testid=263"
+    c.ok((live_share / "detail.csv").exists(), "live detail.csv 拷进共享目录了")
+    c.ok((live_share / "progress.json").exists(), "水位文件也拷了")
+    if (live_share / "detail.csv").exists():
+        src_line = (DATA / "live/channel=27-188-10-2/testid=263/detail.csv"
+                    ).read_text(encoding="utf-8-sig").splitlines()[1]
+        dst_line = (live_share / "detail.csv"
+                    ).read_text(encoding="utf-8-sig").splitlines()[1]
+        c.ok(src_line == dst_line, "拷过去的内容一字未变")
+    readme = SHARE / "live" / "README.md"
+    c.ok(readme.exists(), "live/README.md 生成了")
+    if readme.exists():
+        t = readme.read_text(encoding="utf-8")
+        c.ok("与正式数据集的 detail.csv 完全一致" in t,
+             "★ 说明里写清了列格式与正式一致（口径不掺水）")
+        c.ok("正式结论、给协会的报告一律以正式数据集为准" in t,
+             "★ 说明了 live 只用于观察趋势，结论以正式数据集为准")
+        c.ok("rows_collected" in t and "水位" in t, "解释了水位字段")
+        c.ok("6597" in t, "列出了当前进行中的测试（6597 行那个）")
+    c.ok(not (SHARE / "live" / "channel=27-188-10-3").exists(),
+         "★ 损坏的水位条目被跳过（没把坏数据共享出去）")
+    # 主 README 的目录树也要提到 live
+    main_readme = (SHARE / "README.md").read_text(encoding="utf-8")
+    c.ok("live/" in main_readme, "主 README 的目录树里有 live/")
+
+    # 红线：共享目录里永远不该有能执行的代码（Agent 有 shell 权限）
+    execs = [str(p.relative_to(SHARE)) for p in SHARE.rglob("*")
+             if p.suffix in (".py", ".sh") or (p.is_file() and p.stat().st_mode & 0o111
+                                               and p.suffix not in (".csv", ".json", ".md"))]
+    c.ok(not execs, "★ 共享目录里没有任何可执行代码（红线）", str(execs[:3]))
 
     print()
     print(BAR)

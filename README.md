@@ -22,6 +22,14 @@
 | `console.py` | **★ Web 控制台**：给非技术研究员看的只读网页（零依赖，只用标准库） |
 | `selftest_console.py` | `console.py` 的离线测试（26 项），**不需要真机** |
 | `service.sh` | 采集服务的启停脚本（start/stop/status/ensure/log） |
+| `figures.py` | **★ 出图**：零依赖 SVG 画报告用的对比图（长循环/首效VQ/平均电压/倍率/dQ/dV） |
+| `selftest_figures.py` | `figures.py` 的离线测试（207 项），**不需要真机** |
+| `report_pack.py` | **★ 报告数据契约**：把采集数据算成提示词体系要的 global_context + 28 个块数据 |
+| `render.py` | **★ 报告组装**：Agent 写的段落 → HTML（确定性代码，不经模型） |
+| `report_build.py` | **★ 一键编排**：任选两通道 → 数据包 + 6 张图 + 任务包（整目录替换，段落默认保住） |
+| `selftest_report.py` | 报告链路离线端到端测试（50 项：合成数据→任务包→HTML），**不需要真机** |
+| `报告任务_脚手架/` | 任务包的静态部分（渲染模板、31 条块提示词、任务说明）—— 改模板/提示词改这里 |
+| `报告任务_段落_已生成/` | 最近一次 Agent 写好的 46 段正文备份（任务包被重建时用它恢复：`report_build.py --paragraphs-from 报告任务_段落_已生成`） |
 | `selftest_export.py` | `export_review.py` 的离线端到端测试，**不需要真机** |
 | `dump_raw.py` | 原始字节诊断。解析失败时用它看清客户端到底发了什么 |
 | `CHECKLIST.md` | 准备清单、现场信息采集表、验证路径、故障速查、时间倒排 |

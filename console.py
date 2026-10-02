@@ -299,6 +299,35 @@ def page(title: str, body: str) -> bytes:
     return PAGE.format(css=CSS, body=body).encode("utf-8")
 
 
+def live_progress(root: Path) -> list[dict]:
+    """读 live 区的水位文件，给「进行中的测试」栏目用。
+
+    live 区由采集器每日增量填充（跑着的测试也能拿到数据，不用等结束）。
+    通道和测试号以**路径**为准（权威），progress 内容为辅；
+    坏了的条目跳过，不让一个坏文件拖垮整个页面。
+    """
+    live_root = root / "live"
+    if not live_root.is_dir():
+        return []
+    out: list[dict] = []
+    for pj in sorted(live_root.glob("channel=*/testid=*/progress.json")):
+        ch = pj.parts[-3].split("=", 1)[1]
+        tid = pj.parts[-2].split("=", 1)[1]
+        try:
+            prog = json.loads(pj.read_text(encoding="utf-8-sig"))
+        except (json.JSONDecodeError, OSError):
+            continue        # 坏条目跳过 —— 显示一行全是"—"的假进度比不显示更糟
+        if not isinstance(prog, dict):
+            continue
+        out.append({
+            "channel": ch, "testid": tid,
+            "rows": prog.get("rows_collected"),
+            "total": prog.get("total_on_device"),
+            "updated_at": prog.get("updated_at"),
+        })
+    return out
+
+
 def render_home(root: Path, share_dir: Path | None, msg: str = "") -> bytes:
     recs = load_manifest(root)
     st = load_status(root)
@@ -346,6 +375,35 @@ def render_home(root: Path, share_dir: Path | None, msg: str = "") -> bytes:
     n_incomplete = sum(1 for r in recs if not r.get("upload_complete"))
     incomplete_cls = "bad" if n_incomplete else "ok"
 
+    # ---- 进行中的测试（每日增量，live 区）----
+    # 增量由采集器每天自动跑；这里只读水位文件展示进度。
+    live = live_progress(root)
+    working_n = sum(1 for v in (st.get("statuses") or {}).values() if v == "working")
+    if live:
+        live_rows = "".join(
+            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>".format(
+                esc(r["channel"]), esc(r["testid"]),
+                esc(r["rows"] if r["rows"] is not None else "—"),
+                esc(r["total"] if r["total"] is not None else "—"),
+                esc(r["updated_at"] or "—"))
+            for r in live)
+        live_html = (
+            "<h2>进行中的测试（每日增量）</h2>"
+            "<div class='sub'>采集器每天自动从<b>跑着的测试</b>里追加一次明细，"
+            "存放在 live/ 区 —— <b>与正式数据集相互独立</b>，"
+            "测试结束后仍会做一次完整采集作为正式数据。</div>"
+            "<table><tr><th>通道</th><th>测试号</th><th>已拉行数</th>"
+            "<th>设备端总数</th><th>最近更新</th></tr>" + live_rows + "</table>")
+    elif working_n:
+        live_html = (
+            "<h2>进行中的测试（每日增量）</h2>"
+            f"<p class='muted'>有 {working_n} 个通道正在跑测试，"
+            "但还没有增量数据 —— 等采集器的下一次节拍"
+            "（每天 02:00），或在盒子上手动跑 "
+            "<code>python3 collector.py --incremental-now</code>。</p>")
+    else:
+        live_html = ""
+
     body = f"""
 <h1>BatteryLab 数据控制台</h1>
 <div class="sub">数据目录 <code>{esc(root)}</code> ｜ 控制台 v{VERSION}</div>
@@ -376,6 +434,7 @@ def render_home(root: Path, share_dir: Path | None, msg: str = "") -> bytes:
 <h2>数据集（{len(recs)} 个）</h2>
 {table}
 
+{live_html}
 <h2>给 AI 助手的数据</h2>
 <div class="sub">
   共享目录 <code>{esc(share_dir or '（未配置）')}</code>。

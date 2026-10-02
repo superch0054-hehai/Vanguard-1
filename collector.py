@@ -45,7 +45,7 @@ import os
 import sys
 import time
 from dataclasses import dataclass, field, asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -58,6 +58,7 @@ from neware_client import (
     DEVTYPE_NAMES,
     STATUS_NAMES,
     STEPTYPE_NAMES,
+    MAX_DOWNLOAD_COUNT,
     parse_channel,
     write_rows,
 )
@@ -92,6 +93,13 @@ class Config:
     backfill: bool = False      # 启动时补采"已结束但没采过"的测试
     backfill_max: int = 5       # 一次最多补采几个通道，防止一上来拉爆
     log_json: bool = False
+    # ---- 每日增量读取（live 区）----
+    # 需求："一天能更新一次数据就行，不要等电池停下来才能读取数据"。
+    # 增量数据写 live 区，**绝不混进正式数据集** —— 结束时那次正式采集照旧，
+    # 口径、对账结果、已有报告都不受影响。
+    incremental_enabled: bool = True
+    incremental_hour: int = 2       # 每天几点跑一轮（失败则每 30 分钟重试到当天成功）
+    incremental_now: bool = False   # 手动跑一轮就退出（验收 / 临时用）
 
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> "Config":
@@ -117,6 +125,9 @@ class Config:
         cfg.backfill = args.backfill
         cfg.backfill_max = args.backfill_max
         cfg.detail_enabled = not args.no_detail
+        cfg.incremental_enabled = not args.no_incremental
+        cfg.incremental_hour = getattr(args, "incremental_hour", 2)
+        cfg.incremental_now = args.incremental_now
         return cfg
 
 
@@ -188,6 +199,8 @@ class Collector:
         self.client: NewareClient | None = None
         self.transport: Any = None
         self._started_at = time.monotonic()
+        # 每日增量读取：下一次该跑的时间点。None = 还没排过（启动时先立即补拉一轮）。
+        self.next_incremental: datetime | None = None
 
     # -- 基础 -------------------------------------------------------------
 
@@ -455,6 +468,169 @@ class Collector:
                 return False
             time.sleep(interval)
 
+    # -- 每日增量读取（live 区）------------------------------------------
+
+    def live_dir(self, ch: Channel, testid: str) -> Path:
+        """live 区目录。列格式与正式 detail.csv 一致，但**互相独立**：
+        正式数据集仍只在测试结束时采一次，口径与对账结果不受这里影响。"""
+        return self.root / "live" / f"channel={ch.key}" / f"testid={testid}"
+
+    @staticmethod
+    def _read_progress(path: Path) -> dict[str, Any] | None:
+        """读水位。返回 None 表示水位文件坏了 —— 这时**拒绝拉取**。
+
+        为什么不当作 0：当 0 会从头重拉并追加，live 文件里全是重复行。
+        宁可缺一天，不可写乱数据。
+        """
+        if not path.exists():
+            return {}
+        try:
+            d = json.loads(path.read_text(encoding="utf-8-sig"))
+            return d if isinstance(d, dict) else None
+        except (json.JSONDecodeError, OSError) as exc:
+            log(f"  [live] 水位文件损坏（{path.name}：{exc}），本轮跳过该通道。"
+                "修复或删除后下轮会重新从头拉。", "ERROR")
+            return None
+
+    @staticmethod
+    def _append_rows(rows: list[dict[str, Any]], path: Path) -> int:
+        """追加写 CSV。列名规则与 write_rows 一致（首行键序）。
+
+        ★ 编码的坑：write_rows 用 utf-8-sig（文件头带 BOM，Excel 才不乱码）。
+        但 utf-8-sig 在 **append 模式**下每次写入都会再吐一个 BOM 到文件中间，
+        所以这里新文件才用 utf-8-sig，追加必须用 utf-8。
+        """
+        import csv as _csv
+        if not rows:
+            return 0
+        flat = [{k: (json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v)
+                 for k, v in row.items()} for row in rows]
+        fieldnames: list[str] = []
+        for row in flat:
+            for key in row:
+                if key not in fieldnames:
+                    fieldnames.append(key)
+        new_file = not path.exists()
+        enc = "utf-8-sig" if new_file else "utf-8"
+        with open(path, "a" if not new_file else "w", newline="", encoding=enc) as fh:
+            writer = _csv.DictWriter(fh, fieldnames=fieldnames)
+            if new_file:
+                writer.writeheader()
+            writer.writerows(flat)
+        return len(flat)
+
+    def incremental_pass(self, channels: list[Channel]) -> int:
+        """对正在跑测试的通道做一轮增量读取，追加到 live 区。返回新增行数。
+
+        每个通道：inquiredf 拿 testid 和数据点总数 → 和水位比 →
+        只 download 新增那段（分块，单次 ≤ MAX_DOWNLOAD_COUNT）→ 追加 → 更新水位。
+        单个通道出错只影响它自己，不抛出 —— 调用方靠返回值和日志感知。
+        """
+        assert self.client is not None
+        added_total = 0
+        for ch in channels:
+            try:
+                checks = NewareClient.parse_inquiredf(self.client.inquiredf([ch], 0))
+                if not checks:
+                    log(f"  [live] {ch.key}：inquiredf 没返回，跳过", "WARN")
+                    continue
+                c = checks[0]
+                testid = str(c.get("testid") or "")
+                count = int(c.get("uploaded") or 0)
+                if not testid or count <= 0:
+                    log(f"  [live] {ch.key}：还没有可读的测试数据，跳过")
+                    continue
+                if c.get("complete"):
+                    # 传完了 → 正式采集会接住，live 不用再追
+                    log(f"  [live] {ch.key}：测试 {testid} 已传完，等正式采集，跳过")
+                    continue
+
+                pdir = self.live_dir(ch, testid)
+                prog_path = pdir / "progress.json"
+                prog = self._read_progress(prog_path)
+                if prog is None:
+                    continue
+                wm = int(prog.get("rows_collected", 0))
+                old_testid = prog.get("testid")
+                if old_testid and old_testid != testid:
+                    # 通道被复用了：水位清零。live 目录按 testid 分开，不会互相覆盖。
+                    log(f"  [live] {ch.key}：测试号变了（{old_testid} → {testid}），"
+                        "另起新文件、水位清零")
+                    wm = 0
+                if count < wm:
+                    log(f"  [live] {ch.key}：设备端条数 {count} 比水位 {wm} 还小 —— "
+                        "数据异常，拒绝拉取（宁缺勿乱）", "ERROR")
+                    continue
+                if count == wm:
+                    continue        # 没有新增，什么都不做
+
+                rows: list[dict[str, Any]] = []
+                pos = wm + 1
+                while pos <= count:
+                    n = min(MAX_DOWNLOAD_COUNT, count - pos + 1)
+                    rows.extend(self.client.parse_data(
+                        self.client.download(ch, auxid=0, testid=0,
+                                             startpos=pos, count=n)))
+                    pos += n
+                if self.cfg.dry_run:
+                    log(f"  [live] {ch.key}：dry-run，本应新增 {len(rows)} 行")
+                    continue
+
+                pdir.mkdir(parents=True, exist_ok=True)
+                n_added = self._append_rows(rows, pdir / "detail.csv")
+                added_total += n_added
+                prog = {
+                    "testid": testid,
+                    "rows_collected": wm + n_added,
+                    "total_on_device": count,
+                    "updated_at": datetime.now().isoformat(timespec="seconds"),
+                }
+                prog_path.write_text(json.dumps(prog, ensure_ascii=False,
+                                                indent=1) + "\n", encoding="utf-8")
+                log(f"  [live] {ch.key}：测试 {testid} 新增 {n_added} 行"
+                    f"（{wm} → {count}）")
+            except NewareError as exc:
+                log(f"  [live] {ch.key}：增量读取失败（{exc}），下轮重试", "ERROR")
+            except Exception as exc:      # noqa: BLE001
+                log(f"  [live] {ch.key}：未预期异常 {exc}，下轮重试", "ERROR")
+        return added_total
+
+    def _next_incremental_time(self, now: datetime) -> datetime:
+        """下一次增量时间点：今天（或明天）的 incremental_hour 点整。"""
+        nxt = now.replace(hour=self.cfg.incremental_hour, minute=0,
+                          second=0, microsecond=0)
+        if nxt <= now:
+            nxt += timedelta(days=1)
+        return nxt
+
+    def _run_incremental_safely(self) -> None:
+        """包一层安全：增量失败绝不影响 30 秒轮询主流程。"""
+        now = datetime.now()
+        try:
+            working = [c for c in self.channels
+                       if self.last_status.get(c.key) == "working"]
+            if not working:
+                log("增量读取：当前没有正在跑测试的通道，跳过")
+            else:
+                added = self.incremental_pass(working)
+                log(f"增量读取完成：本轮新增 {added} 行")
+            self.next_incremental = self._next_incremental_time(now)
+            log(f"下一次增量读取：{self.next_incremental:%Y-%m-%d %H:%M}")
+        except Exception as exc:      # noqa: BLE001
+            log(f"增量读取失败（{exc}），30 分钟后重试", "ERROR")
+            self.next_incremental = now + timedelta(minutes=30)
+
+    def _maybe_incremental(self) -> None:
+        if not self.cfg.incremental_enabled:
+            return
+        now = datetime.now()
+        if self.next_incremental is None:
+            # 启动补拉：服务重启期间错过的数据在这里补上，然后排明天的点
+            self._run_incremental_safely()
+            return
+        if now >= self.next_incremental:
+            self._run_incremental_safely()
+
     # -- 心跳 -------------------------------------------------------------
 
     def _write_heartbeat(self, statuses: dict[str, str]) -> None:
@@ -493,6 +669,15 @@ class Collector:
             f"轮询间隔 {self.cfg.poll_interval:g}s"
             + ("  【dry-run】" if self.cfg.dry_run else ""))
 
+        if self.cfg.incremental_now:
+            # 手动跑一轮增量就退出（--incremental-now，验收 / 临时补拉用）
+            self.connect()
+            self.discover()
+            self.poll_once()          # 先拿一次状态，last_status 就绪
+            self._run_incremental_safely()
+            self.disconnect()
+            return 0
+
         while True:
             try:
                 if self.client is None:
@@ -505,6 +690,7 @@ class Collector:
                 n = self.poll_once()
                 if n:
                     log(f"本轮采集了 {n} 份数据集")
+                self._maybe_incremental()
                 if self.cfg.once:
                     log("--once：本轮结束，退出")
                     return 0
@@ -548,6 +734,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="启动时补采通道上「已结束但没采过」的测试（首次运行建议加）")
     p.add_argument("--backfill-max", type=int, default=5,
                    help="一次最多补采几个通道（默认 5，防止一上来拉爆）")
+    p.add_argument("--no-incremental", action="store_true",
+                   help="关闭每日增量读取（live 区）")
+    p.add_argument("--incremental-hour", type=int, default=2,
+                   help="每天几点跑一轮增量读取（默认 2 点；失败每 30 分钟重试）")
+    p.add_argument("--incremental-now", action="store_true",
+                   help="立即手动跑一轮增量读取然后退出（验收 / 临时补拉用）")
     return p
 
 
