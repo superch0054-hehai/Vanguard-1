@@ -28,8 +28,8 @@ import sys
 from pathlib import Path
 from xml.sax.saxutils import escape as _xml_esc
 
-from probe import (CAP_TO_MAH, CHARGING_STEPTYPES, DISCHARGING_STEPTYPES,
-                   _steptype, group_cycles)
+from probe import (CAP_TO_MAH, CE_CHARGE_OVER_DISCHARGE, CHARGING_STEPTYPES,
+                   DISCHARGING_STEPTYPES, _steptype, ce_pct, group_cycles)
 
 VERSION = "1.0"
 
@@ -93,10 +93,22 @@ CE_FLOOR_PCT = 50.0
 """
 
 
+# 效率口径（充电 ÷ 放电，负极半电池）—— 定义在 probe.py，**只那一个开关**
 def ce_never_healthy(cs: list[dict]) -> float | None:
-    """整段测试的最大库仑效率（低于 CE_FLOOR_PCT 才返回，否则 None）。"""
-    vals = [c["ce"] for c in cs
-            if isinstance(c.get("ce"), (int, float)) and c["ce"] > 0]
+    """整段测试的**放电/充电容量比**最大值（低于 CE_FLOOR_PCT 才返回，否则 None）。
+
+    ★ 为什么这里用"放电 ÷ 充电"而不是 `ce` 字段：本项目的库仑效率口径是
+    **充电 ÷ 放电**（负极半电池，见 `ce_pct`），电芯"根本没在放电"时该值会趋于
+    无穷大或直接是 None（放电为 0），用它**判不出来**。判"有没有在放电"这件事，
+    放电/充电比是更直接的量 —— 口径相反不影响这条启发式的含义。
+    """
+    vals = []
+    for c in cs:
+        chg, dis = c.get("chg"), c.get("dis")
+        if not isinstance(chg, (int, float)) or not isinstance(dis, (int, float)):
+            continue
+        if chg > 0:
+            vals.append(dis / chg * 100.0)
     if not vals:
         return None
     m = max(vals)
@@ -589,7 +601,7 @@ def cycles_of(steps: list[dict], mass_g: float | None = None) -> list[dict]:
         if first_dis is None:
             first_dis = d
         rec = dict(cycle=i, chg=c, dis=d,
-                   ce=(d / c * 100) if c else None,
+                   ce=ce_pct(c, d),
                    ee=(eng_d / eng_c * 100) if eng_c else None,
                    retention=(d / first_dis * 100) if first_dis else None,
                    dcir_mohm=dcir,
@@ -788,7 +800,7 @@ def vq_curves(detail_rows: list[dict],
     discharge = rows_of(DISCHARGING_STEPTYPES)
     q_chg = max((q for q, _ in charge), default=0.0)
     q_dis = max((q for q, _ in discharge), default=0.0)
-    ice = (q_dis / q_chg * 100.0) if q_chg else None
+    ice = ce_pct(q_chg, q_dis)     # 首圈效率同口径（负极半电池：充/放）
     return {"charge": charge, "discharge": discharge, "ice": ice}
 
 
@@ -1050,7 +1062,7 @@ def cycles_of_detail(detail_rows: list[dict],
         ma = (sum(curr_by_cycle.get(cid, [])) / len(curr_by_cycle[cid]) * 1000.0
               if curr_by_cycle.get(cid) else 0.0)
         rec = dict(cycle=cid + 1, chg=c, dis=d,
-                   ce=(d / c * 100) if c else None,
+                   ce=ce_pct(c, d),
                    ee=(pc["dis_eng"] / pc["chg_eng"] * 100) if pc["chg_eng"] else None,
                    retention=(d / first_dis * 100) if first_dis else None,
                    dcir_mohm=None,

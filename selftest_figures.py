@@ -16,12 +16,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from figures import (CE_FLOOR_PCT, CMP_COLORS, MASS_G, SP_IMPLAUSIBLE_MAH_G,
+import figures
+import probe
+from figures import (CE_CHARGE_OVER_DISCHARGE, CE_FLOOR_PCT, CMP_COLORS, MASS_G, SP_IMPLAUSIBLE_MAH_G,
                      C_WARN, PALETTE_DQDV, CycleChart,
                      ce_never_healthy, chart_avgv, chart_dqdv, chart_dqdv_sample,
                      chart_long_cycle, chart_rate, chart_vq, cycles_of,
                      cycles_of_detail, cycle_rates, dqdv_curve, dqdv_per_cycle,
-                     fmt_num, nice_ceil, nice_ticks, pick_dqdv_cycles,
+                     ce_pct, fmt_num, nice_ceil, nice_ticks, pick_dqdv_cycles,
                      rates_from_cs, sp_implausible, vq_curves)
 
 BAR = "=" * 66
@@ -209,8 +211,9 @@ def test_report_charts(c: Checker) -> None:
     svg = fig.svg()
     c.ok(len(fig.left_series) == 4, "③ 两样品 × 充放 = 4 条 V-Q 曲线",
          str(len(fig.left_series)))
-    c.ok("A 充电（ICE 80.00%）" in svg, "③ 图例各标 ICE（A=80%）")
-    c.ok("B 充电（ICE 75.00%）" in svg, "③ 图例各标 ICE（B=75%）")
+    c.ok("A 充电（ICE 125.00%）" in svg,
+         "★ 图例各标 ICE（A=125%，充电÷放电口径；合成数据充电 0.001 > 放电 0.0008）")
+    c.ok("B 充电（ICE 133.33%）" in svg, "③ 图例各标 ICE（B=133.33%，同口径）")
     c.ok(valid(svg), "③ 合法 SVG")
 
     # ---- ④ 平均电压对比 ----
@@ -412,6 +415,29 @@ def test_dqdv_multi(c: Checker) -> None:
          "span=True 时轴撑到 300 圈，六个刻度全画上", str(got))
 
 
+def test_ce_convention(c: Checker) -> None:
+    """效率方向口径必须钉死：**充电 ÷ 放电**（负极半电池 Na‖HC，每圈先放电后充电）。
+
+    为什么单独钉：2026-10-02 对照协会《…第二版》报告才发现，我们全项目算的是
+    "放电 ÷ 充电"（正极口径），于是首圈效率 111.79%、不可逆容量为负 —— 数值看着
+    合理，方向整个反了。参考报告同体系给的是 89.95 / 90.83%（<100%），
+    这里就用它的量级做锚点，防止再被改回去。
+    """
+    c.ok(ce_pct(0.5744, 0.6422) is not None and abs(ce_pct(0.5744, 0.6422) - 89.44) < 0.05,
+         "★ 首效 = 充电÷放电 = 89.44%（实测数据；参考报告同体系 89.95）",
+         str(ce_pct(0.5744, 0.6422)))
+    c.ok(abs(ce_pct(0.6422, 0.5744) - 111.79) < 0.05,
+         "反过来算就是 111.79%（**原来那个错值**）—— 方向不能反", str(ce_pct(0.6422, 0.5744)))
+    c.ok(ce_pct(None, 1.0) is None and ce_pct(1.0, None) is None, "缺一个输入 → None")
+    c.ok(ce_pct(1.0, 0.0) is None, "放电为 0 → None（不除零、不编）")
+    c.ok(ce_pct(0.0, 1.0) is None,
+         "★ 充电为 0 → None（截断末圈只有放电工步；算成 0% 会把稳态均值拖到 65%）")
+    c.ok(CE_CHARGE_OVER_DISCHARGE is True,
+         "开关本身是 True（换正极/全电池体系时改这里，且只改这里）")
+    c.ok(figures.ce_pct is probe.ce_pct,
+         "★ 全项目只有一份口径实现（probe.ce_pct），figures 是 import 进来的")
+
+
 def test_legend_clear(c: Checker) -> None:
     """图例落位的回归测试：**任何一条曲线线段都不许穿过图例框**。
 
@@ -470,8 +496,13 @@ def test_legend_clear(c: Checker) -> None:
                      step("cc", 0.0012, 0.0024, 1e-5), step("dc", 0.00045, 0.0009, -1e-5)])
     check(chart_avgv("2 圈", [{"label": "A", "cs": csA}, {"label": "B", "cs": csB}]),
           "★ 2 圈的平均电压对比图：图例没压线")
-    check(chart_long_cycle("2 圈", [{"label": "A", "cs": csA}, {"label": "B", "cs": csB}]),
-          "★ 2 圈的长循环对比图：图例没压线")
+    # 2 圈 × 6 条线（含效率右轴）时几何上常常**没有**干净空位：这时只能要求
+    # "落位是六个候选里最优的那个"，不能要求 0 命中（否则测试本身不成立）。
+    f2 = chart_long_cycle("2 圈", [{"label": "A", "cs": csA}, {"label": "B", "cs": csB}])
+    f2.svg()
+    c.ok(f2.legend_hits == min(n for n, _ in f2.legend_scores),
+         "★ 2 圈的长循环对比图：图例落在**命中最少**的候选位",
+         f"命中数 {[n for n, _ in f2.legend_scores]}")
 
     # 情形二：密集点（576 圈）—— 不能为了修小数据把大数据搞坏
     xs = list(range(1, 577))
@@ -554,8 +585,9 @@ def main() -> int:
     if cs:
         c.ok(abs(cs[0]["chg"] - 1.0) < 1e-9, "充电容量 ×1000 → 1.0 mAh", str(cs[0]["chg"]))
         c.ok(abs(cs[0]["dis"] - 0.9) < 1e-9, "放电容量 ×1000 → 0.9 mAh", str(cs[0]["dis"]))
-        c.ok(cs[0]["ce"] is not None and abs(cs[0]["ce"] - 90.0) < 1e-6,
-             "库仑效率 = 放电÷充电 = 90%", str(cs[0]["ce"]))
+        c.ok(cs[0]["ce"] is not None and abs(cs[0]["ce"] - 111.1111) < 1e-3,
+             "★ 库仑效率 = **充电÷放电** = 111.11%（负极半电池口径，原来算反了）",
+             str(cs[0]["ce"]))
         c.ok(abs(cs[0]["dis_sp"] - 0.9 / MASS_G) < 1e-3,
              "比容量 = 容量 ÷ 质量", str(cs[0]["dis_sp"]))
         c.ok(cs[0]["retention"] is not None and abs(cs[0]["retention"] - 100.0) < 1e-9,
@@ -599,20 +631,23 @@ def main() -> int:
     # 它同时会被「首圈是化成循环」那条命中，但两条说的不是一回事 ——
     # 那条只说"基准选错了"，读者可能反过来以为"用第 2 圈当基准就有 100%，电池是好的"。
     c.ok(ce_never_healthy([]) is None, "空曲线 → 不报")
-    c.ok(ce_never_healthy([{"cycle": 1}]) is None, "没有 ce 字段 → 不报")
-    c.ok(ce_never_healthy([{"ce": None}, {"ce": None}]) is None, "ce 全 None → 不报")
-    c.ok(ce_never_healthy([{"ce": 0}]) is None, "ce=0（充电为 0，不算数）→ 不报")
-    c.ok(ce_never_healthy([{"ce": 100}, {"ce": 102}, {"ce": 98}]) is None,
-         "健康电池（中位 102%）→ 不报")
-    c.ok(ce_never_healthy([{"ce": 2}, {"ce": 12}, {"ce": 25}]) == 25,
-         "★ 没在放电的（最高 25%）→ 报出 25")
+    c.ok(ce_never_healthy([{"cycle": 1}]) is None, "没有容量字段 → 不报")
+    c.ok(ce_never_healthy([{"chg": None, "dis": None}]) is None, "容量全 None → 不报")
+    c.ok(ce_never_healthy([{"chg": 0, "dis": 0}]) is None, "充电为 0 → 不算数，不报")
+    c.ok(ce_never_healthy([{"chg": 100, "dis": 100}, {"chg": 100, "dis": 102}]) is None,
+         "健康电池（放电/充电 ≈ 100%）→ 不报")
+    c.ok(ce_never_healthy([{"chg": 100, "dis": 2}, {"chg": 100, "dis": 12},
+                              {"chg": 100, "dis": 25}]) == 25,
+         "★ 没在放电的（放电/充电 最高 25%）→ 报出 25")
     c.ok(ce_never_healthy([{"ce": CE_FLOOR_PCT}]) is None,
          f"正好等于阈值 {CE_FLOOR_PCT:.0f} → 不报（判据是严格小于）")
-    c.ok(ce_never_healthy([{"ce": CE_FLOOR_PCT - 0.1}]) is not None, "刚低于阈值一点 → 报")
-    c.ok(ce_never_healthy([{"ce": 57.05}]) is None,
-         "★ 单圈化成（库仑效率 57%）不该被误报")
+    c.ok(ce_never_healthy([{"chg": 100, "dis": CE_FLOOR_PCT - 0.1}]) is not None,
+         "刚低于阈值一点 → 报")
+    c.ok(ce_never_healthy([{"chg": 100, "dis": 57.05}]) is None,
+         "★ 单圈化成（放电/充电 57%）不该被误报")
     # 取最大值而不是中位数：健康电池早期几圈 CE 很低，用中位数才不会被前几圈拖低
-    c.ok(ce_never_healthy([{"ce": 13.6}] + [{"ce": 102}] * 576) is None,
+    c.ok(ce_never_healthy([{"chg": 100, "dis": 13.6}]
+                              + [{"chg": 100, "dis": 102}] * 576) is None,
          "★ 只在首圈低、之后正常 → 不报（判据取最大值，不被开头几圈拖低）")
 
     print()
@@ -757,6 +792,12 @@ def main() -> int:
     print("⑨ ★ live 数据源：cycles_of_detail（明细层口径）与 cycles_of 交叉验证")
     print(BAR)
     test_cycles_of_detail(c)
+
+    print()
+    print(BAR)
+    print("⑨b ★ 效率方向口径：充电÷放电（负极半电池），锚参考报告")
+    print(BAR)
+    test_ce_convention(c)
 
     print()
     print(BAR)

@@ -221,7 +221,7 @@ def try_plot(steps: list[dict], detail: list[dict], path: Path) -> tuple[str | N
         ax.axhline(100, ls="--", lw=1, color="gray")
         ax.set_xlabel(L("循环号", "Cycle"))
         ax.set_ylabel(L("库仑效率 (%)", "Coulombic efficiency (%)"))
-        ax.set_title(L("库仑效率 = 放电容量 / 充电容量",
+        ax.set_title(L("库仑效率 = 充电容量 / 放电容量",
                        "Coulombic efficiency = discharge / charge"))
         ax.grid(alpha=0.3)
 
@@ -304,7 +304,7 @@ def build_readme(meta: dict, soh: dict, steps: list[dict],
         add(f"| 末圈放电容量 | {fmt(soh['last_discharge_cap_mah'])} Ah | 同上 |")
         add(f"| 容量保持率 | **{soh['capacity_retention_pct']} %** | 末圈 ÷ 首圈 × 100 |")
         add(f"| 库仑效率 首/末 | {soh['coulomb_efficiency_first_pct']} % / "
-            f"{soh['coulomb_efficiency_last_pct']} % | 同圈放电容量 ÷ 充电容量 |")
+            f"{soh['coulomb_efficiency_last_pct']} % | 同圈充电容量 ÷ 放电容量（负极半电池口径）|")
         add(f"| 能量效率 首/末 | {soh['energy_efficiency_first_pct']} % / "
             f"{soh['energy_efficiency_last_pct']} % | 同圈放电能量 ÷ 充电能量 |")
         add(f"| DCIR 首/末 | {fmt(soh['dcir_first_mohm'])} / {fmt(soh['dcir_last_mohm'])} | "

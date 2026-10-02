@@ -460,7 +460,7 @@ def render_dataset(root: Path, rec: dict) -> bytes:
     # （踩过：在指标表里用了 ce_bad，而它要到后面的图表段才赋值 —— 详情页直接 500，
     #   而且只有真去点页面才看得出来。静态检查不报，测试不跑也发现不了。）
     sp_bad = None       # 比容量超出合理量级时的最大值（质量假设用错了）
-    ce_bad = None       # 整段测试的最高库仑效率（低于 50% = 电芯没在放电）
+    ce_bad = None       # 整段测试的放电/充电容量比最大值（低于 50% = 电芯没在放电）
     cs: list[dict] = []
     if ddir and (ddir / "steps.csv").exists():
         try:
@@ -614,7 +614,7 @@ def render_dataset(root: Path, rec: dict) -> bytes:
                 chart_html += (
                     "<div class='banner warn'>"
                     f"<b>⚠️ 这颗电芯本身有问题（已确认），放电一直出不来。</b>"
-                    f"整段测试的最高库仑效率只有 <b>{ce_bad:.1f} %</b>，"
+                    f"整段测试的放电/充电容量比最高只有 <b>{ce_bad:.1f} %</b>，"
                     "下面那条红线的放电容量几乎贴着 0。"
                     "<br>这种情况下的<b>「容量保持率」没有意义</b>"
                     "—— 0.88 % 和 100 % 这两个数都不能用来评价这颗电芯。"

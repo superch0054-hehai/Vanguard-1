@@ -36,7 +36,9 @@ WANT_FIGS = [
 ]
 BLOCKS = ("S11", "S12", "S31A", "S31B", "S31C", "S32A", "S32B", "S32C", "S32D",
           "S33A", "S33B", "S34A", "S34B", "S35A", "S35B", "S35C",
-          "S41A", "S41B", "S41C", "S41D", "S43A", "S43B", "S43C",
+          "S41A", "S41B", "S41C", "S41D",
+          "S42INTRO", "S42A", "S42B", "S42C", "S42D", "S42E",
+          "S43A", "S43B", "S43C", "S43D",
           "S51A", "S51B", "S51C", "S52A", "S52B", "S52C")
 
 
@@ -103,6 +105,54 @@ class Checker:
         return 0
 
 
+
+def test_validator(c: Checker) -> None:
+    """程序侧校验器要抓得住三类"数字全对、结论却错"的问题。"""
+    sys.path.insert(0, str(HERE))
+    import validate_paragraphs as V
+
+    data = {"groups": {"A": {"avg_v_trend": "下降", "dV_trend": "减小",
+                             "peak_gap_trend": "减小",
+                             "avg_v_first": 0.2231, "avg_v_last": 0.1908}},
+            "figure_ref": "图 4", "table_ref": "表 7",
+            "instructions": ["★ 效率数值由程序给出、模型只引用，不得据此判断电池好坏"],
+            "length_range": [150, 250]}
+    ctx = {"mass": {"mass_mg": 2}}
+
+    ok_hard, _ = V.check_block("S32C", "平均放电电压由 223.1 mV 下降至 190.8 mV。", data, ctx)
+    c.ok(not ok_hard, "正常段落 → 通过", str(ok_hard))
+
+    hard, _ = V.check_block("S32C", "放电比容量为 999.99 mAh·g⁻¹。", data, ctx)
+    c.ok(any("不可溯源" in h for h in hard), "★ 编造的数值 → 判失败", str(hard))
+
+    hard, _ = V.check_block("S32B", "效率数值由程序给出、模型只引用，不得据此判断电池好坏。",
+                            data, ctx)
+    c.ok(any("instructions" in h for h in hard),
+         "★ 把数据包里给模型的约束抄进正文 → 判失败（S31C 实测那次）", str(hard))
+
+    hard, _ = V.check_block("S32D", "两组 ΔV 随循环增大并趋同。", data, ctx)
+    c.ok(any("方向与数据相反" in h for h in hard),
+         "★ 数据说减小、正文写增大 → 判失败（S34A 实测那次）", str(hard))
+
+    hard, _ = V.check_block("S32C", "两组平均放电电压见图 6。", data, ctx)
+    c.ok(any("图号引用越界" in h for h in hard), "★ 引用了数据包没给的图号 → 判失败", str(hard))
+
+    hard, _ = V.check_block("S32C", "本段使用了显著提升的措辞。", data, ctx)
+    c.ok(any("禁用词" in h for h in hard), "★ 禁用词 → 判失败", str(hard))
+
+    hard, _ = V.check_block("S41A", "两组基本相当。", data, ctx)
+    c.ok(any("n=1" in h for h in hard), "★ 结论段缺「波动范围/复测」→ 判失败", str(hard))
+
+    hard, _ = V.check_block("S42A", "添加剂构建了稳定 SEI。", data, ctx)
+    c.ok(any("机制措辞" in h for h in hard), "★ 机制段没写「可能/推测」→ 判失败", str(hard))
+
+    _, warn = V.check_block("S32C", "短句。", data, ctx)
+    c.ok(any("长度" in w for w in warn), "长度超区间 → 只告警不判失败", str(warn))
+    c.ok("【修正任务】" in V.repair_prompt("S32C", ["数值不可溯源：999.99"])
+         and "999.99" in V.repair_prompt("S32C", ["数值不可溯源：999.99"]),
+         "★ 失败能生成 5-B 的回灌修复提示")
+
+
 def test_scaffold_in_sync(c: Checker) -> None:
     """脚手架里的 render.py 必须与主代码**逐字节一致**。
 
@@ -119,6 +169,7 @@ def test_scaffold_in_sync(c: Checker) -> None:
 def main() -> int:
     c = Checker()
     test_scaffold_in_sync(c)
+    test_validator(c)
 
     print(BAR)
     print("① 合成数据 → report_build 重建任务包")
@@ -163,7 +214,8 @@ def main() -> int:
     print("③ 数据契约：28 个块 + 全局上下文 + 动态数据截止时间")
     print(BAR)
     got = sorted(p.stem for p in (OUT / "block_data").glob("*.json"))
-    c.ok(got == sorted(BLOCKS), f"block_data 恰好 {len(BLOCKS)} 块", f"{len(got)} 块")
+    c.ok(got == sorted(BLOCKS), f"block_data 恰好 {len(BLOCKS)} 块（含 4.2 机制段）",
+         f"{len(got)} 块")
     ctx = json.loads((OUT / "global_context.json").read_text(encoding="utf-8-sig"))
     c.ok(ctx["variable"]["control_short"] == "STD"
          and ctx["variable"]["experimental_short"] == "1%Q④",
@@ -182,7 +234,13 @@ def main() -> int:
     grp = next(iter(s34a["groups"].values()))
     c.ok(grp.get("peak_positions_by_cycle"),
          "★ S34A 数据包给了逐圈峰位（正文要写「峰间距随圈数演变」）", str(list(grp)))
-    c.ok(bool(s34a["notes"]), "S34A 带缺圈说明的 notes", str(s34a["notes"]))
+    c.ok(any("尚未到达" in n for n in s34a["notes"]),
+         "★ S34A 的 notes 里留着可引用的缺圈事实", str(s34a["notes"]))
+    c.ok(all("不得" not in n for n in s34a["notes"]),
+         "★ 约束句（「不得外推」）不在 notes 里 —— 已被拆到 instructions",
+         str(s34a["notes"]))
+    c.ok(any("不得" in i for i in s34a.get("instructions") or []),
+         "★ 约束句落在 instructions 里（正文不得引用）", str(s34a.get("instructions")))
     dq = json.loads((OUT / "block_data" / "S31A.json").read_text(encoding="utf-8-sig"))
     c.ok(len(dq["groups"]) == 2, "S31A 两组数据都在", str(list(dq["groups"])))
 

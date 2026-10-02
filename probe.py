@@ -48,6 +48,30 @@ from neware_client import (
 PASS, FAIL, WARN, SKIP = "PASS", "FAIL", "WARN", "SKIP"
 
 
+
+# ★ 效率方向口径（**换体系时改这一个开关**）------------------------------------
+# 本项目是**负极半电池（Na‖HC）**：每圈**先放电**（钠嵌入）后充电（钠脱出）。
+# 协会《提示词体系》L1 的"防错关键"写明：效率沿用设备导出的"充放电效率"定义
+# ＝**充电容量 ÷ 放电容量**，故首效 89.95% ＜ 100%。
+# 原来全项目算的是"放电 ÷ 充电"（正极/全电池口径）→ 首效 111.79%、不可逆容量为负，
+# 方向整个反了（2026-10-02 对照协会报告才发现）。**只此一处，别在别处再写一遍公式。**
+CE_CHARGE_OVER_DISCHARGE = True
+
+
+def ce_pct(chg, dis):
+    """库仑效率（%）—— 方向由 `CE_CHARGE_OVER_DISCHARGE` 决定。
+
+    任一侧容量为 0 就返回 None：比值**没有定义**。这一条很要紧 —— 进行中数据的
+    末圈常常只有放电工步没有充电工步，"充电=0"若算成 0%，会把稳态平均效率从
+    ~99% 拖到 65%（2026-10-02 实测踩到）。
+    """
+    if chg is None or dis is None or chg <= 0 or dis <= 0:
+        return None
+    if CE_CHARGE_OVER_DISCHARGE:
+        return chg / dis * 100.0
+    return dis / chg * 100.0
+
+
 def _display_width(text: str) -> int:
     """终端显示宽度：CJK 全角字符占 2 列。"""
     return sum(2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
@@ -368,7 +392,9 @@ def soh_preview(steps: list[dict[str, Any]]) -> dict[str, Any]:
     last_cap = last["dis_cap"] * CAP_TO_MAH
 
     def _ce(c: dict[str, Any]) -> float | None:
-        return round(c["dis_cap"] / c["charge_cap"] * 100, 2) if c["charge_cap"] else None
+        # 口径见模块顶部的 CE_CHARGE_OVER_DISCHARGE（负极半电池：充电 ÷ 放电）
+        v = ce_pct(c["charge_cap"], c["dis_cap"])
+        return round(v, 2) if v is not None else None
 
     def _ee(c: dict[str, Any]) -> float | None:
         return round(c["dis_eng"] / c["charge_eng"] * 100, 2) if c["charge_eng"] else None

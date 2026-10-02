@@ -92,7 +92,8 @@ def load_cell(data_dir: Path, channel: str, mass_mg: float,
     if ces:
         bad = [i + 1 for i, v in enumerate(ces) if v > 100.5]
         if bad:
-            ce_anomaly = {"from_cycle": bad[0], "to_cycle": bad[-1], "max": max(ces)}
+            ce_anomaly = {"from_cycle": bad[0], "to_cycle": bad[-1],
+                          "max": round(max(ces), 2)}
     ce_steady = [v for v in ces if v <= 100.5]
 
     # ---- ΔV 极化（充电平均电压 − 放电平均电压，mV）与平台容量占比 ----
@@ -122,8 +123,27 @@ def load_cell(data_dir: Path, channel: str, mass_mg: float,
         if den:
             avgv_slope = round(
                 sum((p[0] - mx) * (p[1] - my) for p in pairs) / den * 100.0 * 1000.0, 2)
+    ce_eff = [c["ce"] for c in cs
+              if c.get("ce") is not None and c["cycle"] in set(effective)]
     ee_vals = [(c["cycle"], c["ee"]) for c in cs
                if c.get("ee") is not None and c["cycle"] in set(effective)]
+
+    # ---- 方向词（3.4 / 3.5 节用）：模型只念方向，不自己比较首末值 ----
+    def _trend(first, last, tol):
+        if first is None or last is None:
+            return None
+        d = last - first
+        return "上升" if d > tol else ("下降" if d < -tol else "基本持平")
+
+    avg_v_trend = _trend(cell_first(dis_v), cell_last(dis_v), 0.0005)      # 单位 V
+    dv_eff = [dvs[i] for i, c in enumerate(cs)
+              if i < len(dvs) and dvs[i] is not None and c["cycle"] in set(effective)]
+    if len(dv_eff) >= 2 and dv_eff[-1] - dv_eff[0] > 1.0:
+        dv_trend = "增大"
+    elif len(dv_eff) >= 2 and dv_eff[0] - dv_eff[-1] > 1.0:
+        dv_trend = "减小"
+    else:
+        dv_trend = "基本持平" if dv_eff else None
 
     # ---- 保持率序列（基线 = 首个完成放电的圈）与两电池交叉检测 ----
     # 保持率只看有效圈：把没走完的末圈排除掉，否则"最新保持率"会取到截断圈的假数
@@ -146,6 +166,21 @@ def load_cell(data_dir: Path, channel: str, mass_mg: float,
     drawn, missing = F.pick_dqdv_cycles(want, effective)
     dqdv_multi = F.dqdv_per_cycle(detail, drawn)
     peaks_multi = {c: peaks(v) for c, v in sorted(dqdv_multi.items())}
+
+    # 峰间距（充电峰位 − 放电峰位，mV）逐圈 + 方向。原来要模型自己相减，还得照着
+    # 提示词里那句写死的"由首圈 X 增大至第 Y 圈以后的 Z"——数据变小时就写成反的。
+    peak_gaps = {}
+    for cyc, pk in sorted(peaks_multi.items()):
+        c_v = (pk.get("chg") or {}).get("voltage_V")
+        d_v = (pk.get("dis") or {}).get("voltage_V")
+        if c_v is not None and d_v is not None:
+            peak_gaps[cyc] = round((c_v - d_v) * 1000.0, 1)
+    gap_keys = sorted(peak_gaps)
+    peak_gap_trend = None
+    if len(gap_keys) >= 2:
+        delta = peak_gaps[gap_keys[-1]] - peak_gaps[gap_keys[0]]
+        peak_gap_trend = "增大" if delta > 2 else ("减小" if delta < -2 else "基本不变")
+
 
     # ---- 数据截止时间（live 的 progress.json；正式数据集用采集时间）----
     prog = dd / "progress.json"
@@ -195,11 +230,20 @@ def load_cell(data_dir: Path, channel: str, mass_mg: float,
         "dv_series": dvs, "dv_mean": round(sum(v for v in dvs if v is not None)
                                            / len([v for v in dvs if v is not None]), 1)
         if any(v is not None for v in dvs) else None,
-        "dv_last": next((v for v in reversed(dvs) if v is not None), None),
+        "dv_last": (round(cell_last(dvs), 2) if cell_last(dvs) is not None else None),
+        "dv_trend": dv_trend,
+        "avg_v_trend": avg_v_trend,
+        "peak_gaps_mv": peak_gaps,
+        "peak_gap_trend": peak_gap_trend,
+        "peak_gap_first_mv": peak_gaps[gap_keys[0]] if gap_keys else None,
+        "peak_gap_last_mv": peak_gaps[gap_keys[-1]] if gap_keys else None,
         "dis_v_series": dis_v,
-        "dis_v_first": next((v for v in dis_v if v is not None), None),
-        "dis_v_last": next((v for v in reversed(dis_v) if v is not None), None),
-        "avgv_slope_mv_100c": avgv_slope,
+        "dis_v_first": (round(cell_first(dis_v), 4) if cell_first(dis_v) is not None else None),
+        "dis_v_last": (round(cell_last(dis_v), 4) if cell_last(dis_v) is not None else None),
+        # 与容量衰减速率同一条护栏：逐圈电压序列里有"圈号合并"造成的跳变时，
+        # 拟合出来的速率没有意义（实测算出 -2034 mV·百圈⁻¹），一律不给出
+        "avgv_slope_mv_100c": (avgv_slope if jump is None else None),
+        "ee_vs_ce": _ee_vs_ce(ee_vals, ce_eff),
         "ee_first": ee_vals[0][1] if ee_vals else None,
         "ee_last": ee_vals[-1][1] if ee_vals else None,
         "platform_last": plat_vals[-1] if plat_vals else None,
@@ -247,6 +291,32 @@ def platform_share_of_cycle(dd: Path, cycle_no: int, threshold_v: float) -> floa
     return round(below / total, 4) if total > 0 else None
 
 
+def _ee_vs_ce(ee_vals: list, ce_eff: list) -> str | None:
+    """能量效率与库仑效率谁下降更快（3.4 节用，模型不再自己比）。
+
+    为什么值得算：EE 反映的是能量损耗，CE 反映的是容量损耗；"EE 比 CE 下降更快"
+    说明极化对能量损耗的影响比对容量损耗更早显现 —— 这是参考报告里的一个结论句，
+    以前要靠模型自己相减比较，现在由程序给。
+    """
+    if len(ee_vals) < 2 or len(ce_eff) < 2:
+        return None
+    ee_drop = ee_vals[0][1] - ee_vals[-1][1]
+    ce_drop = ce_eff[0] - ce_eff[-1]
+    if ee_drop > ce_drop + 1.0:
+        return "EE 下降更快"
+    if ce_drop > ee_drop + 1.0:
+        return "CE 下降更快"
+    return "两者相当"
+
+
+def cell_first(vals):
+    return next((v for v in vals if v is not None), None)
+
+
+def cell_last(vals):
+    return next((v for v in reversed(vals) if v is not None), None)
+
+
 def first_cycle(cur1: dict | None, cs: list[dict],
                 mass_g: float | None = None) -> dict:
     """首圈指标（3.3 节用）：充/放**比容量**、首效、不可逆容量。
@@ -260,15 +330,20 @@ def first_cycle(cur1: dict | None, cs: list[dict],
                 "irreversible_sp": None}
     q_chg = max((q for q, _ in cur1["charge"]), default=0.0)
     q_dis = max((q for q, _ in cur1["discharge"]), default=0.0)
-    ce = (q_dis / q_chg * 100.0) if q_chg else None
+    # ★ 首效口径：**充电 ÷ 放电**（负极半电池 Na‖HC，每圈先放电后充电）——
+    #   协会《提示词体系》L1 的"防错关键"。原来写成 放电÷充电，得 111.79%（>100%），
+    #   正确值应与参考报告同量级（89.95 / 90.83%）。
+    ce = F.ce_pct(q_chg, q_dis)
     if not mass_g:
-        return {"charge_sp": None, "discharge_sp": None, "ce": round(ce, 2)
-                if ce is not None else None, "irreversible_sp": None}
+        return {"charge_sp": None, "discharge_sp": None,
+                "ce": round(ce, 2) if ce is not None else None,
+                "irreversible_sp": None}
+    # 不可逆容量按协会术语表定义取**绝对值**（首圈放电与充电比容量之差）
+    irr = abs(q_dis - q_chg) / mass_g if (q_chg and q_dis) else None
     return {"charge_sp": round(q_chg / mass_g, 2) if q_chg else None,
             "discharge_sp": round(q_dis / mass_g, 2) if q_dis else None,
             "ce": round(ce, 2) if ce is not None else None,
-            "irreversible_sp": round((q_chg - q_dis) / mass_g, 2)
-            if q_chg and q_dis else None}
+            "irreversible_sp": round(irr, 2) if irr is not None else None}
 
 
 # ---------------------------------------------------------------------------
@@ -377,6 +452,113 @@ def build_global_context(labels: dict[str, str], cells: dict[str, dict],
     }
 
 
+
+# 判定一行 notes 是"可以引用的口径说明"还是"给模型的约束"（后者绝不能进正文）。
+# 实测的坑：S31C 把 notes 里那句"效率数值由程序给出、模型只引用，不得据此判断电池好坏"
+# 原样抄进了报告正文 —— 所以按措辞机械拆分，可审计、不会再犯。
+_PROHIBIT = ("不得", "禁止", "不要", "必须", "只准", "一律记", "一个字都")
+
+
+
+# ---- P1b 图/表编号映射（**编号的唯一出处**）----------------------------------
+# 以前 12 处"末句写……见图 N/见表 N"写死在提示词里，改一次图序就要重跑十几段正文。
+# 现在编号只在这里出现，提示词让模型去读数据包的 figure_ref / table_ref。
+BLOCK_REFS = {
+    "S31A": ("图 1", None), "S31B": (None, "表 4"), "S31C": (None, None),
+    "S33A": ("图 2", None), "S33B": (None, "表 5"),
+    "S32A": ("图 3", None), "S32B": (None, "表 6"),
+    "S32C": ("图 4", None), "S32D": (None, "表 7"),
+    "S34A": ("图 5 与图 6", None), "S34B": (None, "表 8"), "S34C": (None, None),
+    "S35A": (None, "表 9"), "S35B": (None, "表 10"), "S35C": (None, None),
+}
+
+
+def split_notes(notes: list[str]) -> tuple[list[str], list[str]]:
+    """→ (notes 可引用, instructions 不可引用)。"""
+    keep, instr = [], []
+    for n in notes:
+        (instr if any(k in n for k in _PROHIBIT) else keep).append(n)
+    return keep, instr
+
+
+
+# ---------------------------------------------------------------------------
+# 机制知识库（《提示词体系》第 4 章）—— S42 段唯一的取材白名单
+# ---------------------------------------------------------------------------
+# 4.2 是全篇唯一允许引入"输入数据之外知识"的块，所以只能用白名单条目，
+# 且每条必须绑定一个**本报告实际存在的**实验现象（matched_phenomena 由程序回填，
+# 没这个现象就不匹配 —— 不允许 Agent 自己找现象、更不允许自造机制）。
+MECHANISM_KB = [
+    {"type": "含氟", "title": "优先成膜，构建稳定 SEI",
+     "content": "含氟分子可能具有较低的还原电位，在首圈优先于电解液溶剂在负极表面分解，"
+                "参与形成富含无机氟化物（如 NaF）的 SEI 膜；该膜致密均匀，"
+                "能有效隔绝电解液与电极的持续接触",
+     "phenomena": ["首效略高", "不可逆容量略低"]},
+    {"type": "通用", "title": "高离子传导，降低界面阻抗",
+     "content": "分解产物中的组分可能具备良好的离子传导能力，使 SEI 膜兼具"
+                "「电子绝缘」与「离子导通」特性",
+     "phenomena": ["ΔV 均值更低", "高倍率段容量更高"]},
+    {"type": "通用", "title": "抑制副反应，减少活性物质损耗",
+     "content": "稳定的 SEI 膜可能抑制了电解液在负极表面的持续分解，"
+                "减少副反应产物的累积",
+     "phenomena": ["稳态 CE 贴近 100%", "容量衰减缓慢"]},
+    {"type": "通用", "title": "界面稳定性保障长循环",
+     "content": "SEI 膜机械强度高、化学稳定性好，在反复的钠嵌入/脱出过程中"
+                "不易破裂重组",
+     "phenomena": ["长循环有效圈数更多", "保持率曲线平滑无拐点"]},
+]
+
+
+def _phenomena(cells: dict, labels: dict) -> dict[str, bool]:
+    """本报告实际存在的实验现象（matched_phenomena 只从这里取真值为 True 的）。
+
+    现象必须**由数据判定**：模型在这一步最容易顺手写"ΔV 更低"这类参考报告里的结论，
+    而本批数据未必成立（实测 1%Q④ 的 ΔV 反而更高）。
+    """
+    chs = sorted(cells)
+    a, b = (chs + [None, None])[:2]
+    ca, cb = cells.get(a, {}), cells.get(b, {})
+    fen: dict[str, bool] = {}
+
+    def _cmp(x, y):
+        return None if x is None or y is None else x - y
+
+    d_ce = _cmp(cb.get("first", {}).get("ce"), ca.get("first", {}).get("ce"))
+    fen["首效略高"] = bool(d_ce is not None and d_ce > 0)
+    d_irr = _cmp(cb.get("first", {}).get("irreversible_sp"),
+                 ca.get("first", {}).get("irreversible_sp"))
+    fen["不可逆容量略低"] = bool(d_irr is not None and d_irr < 0)
+    d_dv = _cmp(cb.get("dv_mean"), ca.get("dv_mean"))
+    fen["ΔV 均值更低"] = bool(d_dv is not None and d_dv < 0)
+    fen["高倍率段容量更高"] = False          # 需要倍率段数据，本批没有
+    ce_ok = all(isinstance(c.get("ce_steady_mean"), (int, float))
+                and abs(c["ce_steady_mean"] - 100.0) <= 2.0 for c in (ca, cb))
+    fen["稳态 CE 贴近 100%"] = bool(ce_ok and ca.get("ce_steady_mean") is not None)
+    fen["容量衰减缓慢"] = bool(ca.get("fade_rate_linear_fit") is not None)
+    reached = max((c.get("cycle_range") or [0, 0])[1] for c in (ca, cb)) or 0
+    fen["长循环有效圈数更多"] = reached >= 50    # 圈数太少时谈不上"更多"
+    fen["保持率曲线平滑无拐点"] = reached >= 50
+    return fen
+
+
+def mechanism_for(variable_type: str | None, cells: dict,
+                  labels: dict) -> list[dict]:
+    """按变量类型检索知识库并回填现象（程序侧完成，Agent 只引用）。"""
+    if not variable_type:
+        return []
+    fen = _phenomena(cells, labels)
+    out = []
+    for e in MECHANISM_KB:
+        if e["type"] != "通用" and e["type"] not in variable_type:
+            continue
+        hit = [p for p in e["phenomena"] if fen.get(p)]
+        out.append({"title": e["title"], "content": e["content"],
+                    "matched_phenomena": hit,
+                    "no_phenomenon_note": (None if hit else
+                                           "该条机制在本报告数据中暂无直接对应现象")})
+    return out
+
+
 def build_block_data(block_id: str, cells: dict[str, dict],
                      ctx: dict, labels: dict[str, str]) -> dict:
     """按体系文档第 3 章的输入字段，构建各块的数据包。
@@ -475,6 +657,14 @@ def build_block_data(block_id: str, cells: dict[str, dict],
             if cell:
                 base["groups"][labels[key]] = cell["first"]
         base["curve_feature"] = "V 形（充电上升、放电下降）"
+        if len(base["groups"]) == 2:
+            g1, g2 = list(base["groups"].values())
+            if g1.get("ce") is not None and g2.get("ce") is not None:
+                base["ce_diff_pp"] = round(g2["ce"] - g1["ce"], 2)
+            if (g1.get("discharge_sp") is not None
+                    and g2.get("discharge_sp") is not None):
+                base["discharge_sp_diff"] = round(
+                    g2["discharge_sp"] - g1["discharge_sp"], 2)
     elif block_id == "S32B":
         # 3.3 首圈库伦效率 · 第 2 段：不可逆容量与损失定位
         for key, cell in ((a, ca), (b, cb)):
@@ -487,8 +677,8 @@ def build_block_data(block_id: str, cells: dict[str, dict],
                     vs[1]["irreversible_sp"] - vs[0]["irreversible_sp"], 4)
         base["loss_location"] = "充电曲线低于放电起始平台之间的斜坡段（SEI 成膜耗钠）"
         base["protocol_note"] = "两组电压窗口与化成工步完全一致，首效具备可比性"
-        base["notes"].append("首效对充放电截止电压与化成协议高度敏感，不得据此判定"
-                             "添加剂改善了首效")
+        base["notes"].append("首效对充放电截止电压与化成协议高度敏感")
+        base["notes"].append("不得据此判定添加剂改善了首效")
     elif block_id == "S32C":
         # 3.4 平均电压曲线分析 · 第 1 段：平均放电电压（能量平均电压口径）
         for key, cell in ((a, ca), (b, cb)):
@@ -499,6 +689,7 @@ def build_block_data(block_id: str, cells: dict[str, dict],
                     "avg_v_last": (round(cell["dis_v_last"], 4)
                                    if cell.get("dis_v_last") is not None else None),
                     "avg_v_fade_mv_100c": cell.get("avgv_slope_mv_100c"),
+                    "avg_v_trend": cell.get("avg_v_trend"),
                 }
         base["avg_v_basis"] = "能量平均电压口径（放电比能量 ÷ 放电比容量）"
         base["notes"].append("圈数尚少，电压衰减速率仅供参考")
@@ -514,11 +705,17 @@ def build_block_data(block_id: str, cells: dict[str, dict],
                                     if cell.get("ee_last") is not None else None),
                     "platform_share_last_pct": (round(cell["platform_last"] * 100, 2)
                                                 if cell["platform_last"] is not None else None),
+                    "dV_trend": cell.get("dv_trend"),
                 }
+                base["groups"][labels[key]]["EE_vs_CE"] = cell.get("ee_vs_ce")
         if len(base["groups"]) == 2:
             vs = list(base["groups"].values())
             if vs[0]["dV_mean_mv"] is not None and vs[1]["dV_mean_mv"] is not None:
                 base["dV_diff_mv"] = round(vs[0]["dV_mean_mv"] - vs[1]["dV_mean_mv"], 1)
+            # 平台容量占比的差值也由程序给（原来模型自己减出 3.59 个百分点）
+            ps = [v.get("platform_share_last_pct") for v in vs]
+            if all(x is not None for x in ps):
+                base["platform_share_diff_pct"] = round(ps[1] - ps[0], 2)
         base["notes"].append("EE 与 CE 的下降幅度要分别陈述，不得混为一谈")
     elif block_id in ("S33A", "S33B"):
         base["notes"].append("★ 本批数据尚未进入 0.2C→5C→0.2C 倍率段（仍在活化段），"
@@ -530,14 +727,20 @@ def build_block_data(block_id: str, cells: dict[str, dict],
                     "peak_positions": peaks(cell["dqdv"]),
                     "peak_positions_by_cycle": cell.get("peaks_multi") or {},
                     "cycles_drawn": cell.get("dqdv_cycles_drawn") or [],
+                    "peak_gap_mv_by_cycle": cell.get("peak_gaps_mv") or {},
+                    "peak_gap_first_mv": cell.get("peak_gap_first_mv"),
+                    "peak_gap_last_mv": cell.get("peak_gap_last_mv"),
+                    "peak_gap_trend": cell.get("peak_gap_trend"),
                 }
         drawn_txt = "、".join(f"第 {c} 圈" for c in (ca.get("dqdv_cycles_drawn") or []))
         miss = ca.get("dqdv_cycles_missing") or []
-        note = f"dQ/dV 逐圈图（图 5/6）已画圈：{drawn_txt or '无'}"
+        # 可引用的口径事实与"不许外推"的约束分两行写 —— 前者能进正文，后者不能（P1a）
+        base["notes"].append(f"dQ/dV 逐圈图已画圈：{drawn_txt or '无'}")
         if miss:
-            note += ("；报告要求的第 " + "、".join(str(c) for c in miss)
-                     + " 圈数据尚未到达（测试进行中）——图上如实标注，不得外推")
-        base["notes"].append(note)
+            base["notes"].append("报告要求的第 " + "、".join(str(c) for c in miss)
+                                 + " 圈数据尚未到达（测试进行中）")
+            base["notes"].append("未到达的圈不得外推")
+        base["notes"].append("图 5/6 是每个样品一张、同圈次氧化与还原同图的多圈叠加图")
     elif block_id == "S34B":
         base["platform_voltage_threshold"] = ctx["test_conditions"]["platform_voltage_threshold"]
         base["notes"].append("平台区分界 0.10 V 为协会第二版报告口径（已确认）；"
@@ -550,6 +753,11 @@ def build_block_data(block_id: str, cells: dict[str, dict],
         if block_id in ("S41A", "S41B", "S41C"):
             base["cross_check"] = None
             base["verdict"] = verdict_for(block_id, cells, labels, chs)
+    elif block_id.startswith("S42"):
+        base["mechanism_kb"] = mechanism_for(ctx["variable"].get("type"), cells, labels)
+        base["phenomena_available"] = {k: v for k, v in _phenomena(cells, labels).items()}
+        if not base["mechanism_kb"]:
+            base["notes"].append("实验变量未提供 → 机制段无法取材，按降级标记输出")
     elif block_id in ("S43A", "S43B", "S43C"):
         base["suggestions"] = {"formulation_validation": None,
                                "characterization": None, "application": None}
@@ -558,6 +766,12 @@ def build_block_data(block_id: str, cells: dict[str, dict],
         base["outlook"] = {"system_iteration": None, "industrialization": None,
                            "deep_research": None}
         base["notes"].append("展望条目未提供（demo 阶段）")
+
+    # ---- P1b：图号/表号由**数据包**给出（不写死在提示词里）----
+    base["figure_ref"], base["table_ref"] = BLOCK_REFS.get(block_id, (None, None))
+
+    # ---- P1a：分离"可引用口径"与"给模型的约束"（后者绝不能进正文）----
+    base["notes"], base["instructions"] = split_notes(base.get("notes") or [])
     return base
 
 

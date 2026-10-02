@@ -28,6 +28,7 @@
 | `render.py` | **★ 报告组装**：Agent 写的段落 → HTML（确定性代码，不经模型） |
 | `report_build.py` | **★ 一键编排**：任选两通道 → 数据包 + 6 张图 + 任务包（整目录替换，段落默认保住） |
 | `selftest_report.py` | 报告链路离线端到端测试（50 项：合成数据→任务包→HTML），**不需要真机** |
+| `validate_paragraphs.py` | **★ 段落校验器**：5-A 八条 + 方向一致性 + instructions 泄漏，输出 `failed_blocks.json` 与 5-B 回灌修复提示（改完段落先跑它） |
 | `报告任务_脚手架/` | 任务包的静态部分（渲染模板、31 条块提示词、任务说明）—— 改模板/提示词改这里 |
 | `报告任务_段落_已生成/` | 最近一次 Agent 写好的 46 段正文备份（任务包被重建时用它恢复：`report_build.py --paragraphs-from 报告任务_段落_已生成`） |
 | `selftest_export.py` | `export_review.py` 的离线端到端测试，**不需要真机** |

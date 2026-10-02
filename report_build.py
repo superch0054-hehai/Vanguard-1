@@ -206,7 +206,9 @@ def main() -> int:
     n = 0
     for bid in ("S11", "S12", "S31A", "S31B", "S31C", "S32A", "S32B", "S32C",
                 "S32D", "S33A", "S33B", "S34A", "S34B", "S35A", "S35B", "S35C",
-                "S41A", "S41B", "S41C", "S41D", "S43A", "S43B", "S43C",
+                "S41A", "S41B", "S41C", "S41D",
+                "S42INTRO", "S42A", "S42B", "S42C", "S42D", "S42E",
+                "S43A", "S43B", "S43C", "S43D",
                 "S51A", "S51B", "S51C", "S52A", "S52B", "S52C"):
         d = RP.build_block_data(bid, cells, ctx, labels)
         (bd / f"{bid}.json").write_text(

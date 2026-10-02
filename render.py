@@ -192,10 +192,16 @@ def render(ctx, labels):
 
     # ---- 块位（S42* 降级为告警；S2*/APPENDIX 由程序模板生成）----
     def frag_for(bid):
-        if bid in ("S42INTRO", "S42E"):
-            return '<div class="note">' + S42_WARNING + "</div>"
+        # S42*（4.2 机制段）：**有正文就用正文**。以前这里无条件写降级告警，
+        # 那是因为当时实验变量未知；现在变量已知、机制知识库也注入了，
+        # 只有在真的没写（或写了却仍是降级标记）时才显示告警。
         if bid.startswith("S42"):
-            return "<p>" + S42_WARNING + "</p>"
+            txt = load_block(bid)
+            if txt and "未通过自动校验" not in txt and "该项数据未提供" not in txt:
+                return text_to_html(bid, txt)
+            extra = S42_WARNING if bid in ("S42INTRO", "S42E") else ""
+            return ('<div class="note">' + (extra or S42_WARNING) + "</div>"
+                    if bid in ("S42INTRO", "S42E") else "<p>" + S42_WARNING + "</p>")
         if bid.startswith("S2") or bid == "APPENDIX":
             if bid == "APPENDIX":
                 return ('<div class="note">附录为预留扩展测试模块'

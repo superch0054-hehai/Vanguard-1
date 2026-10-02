@@ -412,8 +412,11 @@ def test_soh(c: Checker) -> None:
     c.eq(soh["first_discharge_cap_mah"], 190.0, "首圈放电容量（×1000 换算成 mAh）")
     c.eq(soh["last_discharge_cap_mah"], 180.0, "末圈放电容量（×1000）")
     c.eq(soh["capacity_retention_pct"], 94.74, "容量保持率 = 0.18/0.19（比值，不受单位影响）")
-    c.eq(soh["coulomb_efficiency_first_pct"], 95.0, "首圈库仑效率 = 0.19/0.20")
-    c.eq(soh["coulomb_efficiency_last_pct"], 90.0, "末圈库仑效率 = 0.18/0.20")
+    # ★ 口径（2026-10-02 改）：库仑效率 = **充电 ÷ 放电**（负极半电池 Na‖HC，每圈先放电
+    #   后充电）。合成数据 chg 0.20 / dis 0.19 → 0.20/0.19 = 105.26%。协会参考报告同体系
+    #   给的是首效 89.95%（<100%），对应的正是"首圈充电 < 放电"的形态。
+    c.eq(soh["coulomb_efficiency_first_pct"], 105.26, "首圈库仑效率 = 0.20/0.19（充电÷放电口径）")
+    c.eq(soh["coulomb_efficiency_last_pct"], 111.11, "末圈库仑效率 = 0.20/0.18（充电÷放电口径）")
     c.eq(soh["energy_efficiency_first_pct"], 93.75, "首圈能量效率 = 0.750/0.800")
     c.eq(soh["dcir_first_mohm"], 100.0, "首圈 DCIR")
     c.eq(soh["dcir_last_mohm"], 120.0, "末圈 DCIR")
