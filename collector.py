@@ -64,6 +64,13 @@ from neware_client import (
 )
 from probe import soh_preview
 
+# ★ 本项目只关心这六颗：10-1/-2/-3 是老化数据，10-6/-7/-8 是控制演示通道。
+# ⚠️ 2026-10-03 踩过：手动跑 `--incremental-now` 没带 `--channels`，旧默认是
+#   「自动发现设备上全部通道」，于是把别人 58 个通道的测试数据全拉进了 data/live/。
+#   现在不填 `--channels` 就只扫下面这六颗 —— 别人的测试一概不碰。
+WATCH_CHANNELS = ("27-188-10-1,27-188-10-2,27-188-10-3,"
+                  "27-188-10-6,27-188-10-7,27-188-10-8")
+
 VERSION = "1.0"
 
 # 认为"测试已经结束"的状态
@@ -110,8 +117,14 @@ class Config:
         cfg.transport = args.transport or env.get("BTS_TRANSPORT", cfg.transport)
         cfg.pipe = args.pipe or env.get("BTS_PIPE")
 
-        raw_channels = args.channels or env.get("BTS_CHANNELS", "")
+        # ★ 不填 --channels / 环境变量时，只用本项目的六颗（见 WATCH_CHANNELS）：
+        #   以前这里是"空 → 自动发现设备上全部通道"，2026-10-03 因此误拉了别人 58 个通道。
+        raw_channels = (args.channels or env.get("BTS_CHANNELS")
+                        or WATCH_CHANNELS)
         cfg.channels = [c.strip() for c in raw_channels.split(",") if c.strip()]
+        if raw_channels == WATCH_CHANNELS and not args.channels:
+            print(f"  通道未指定 → 只采集本项目通道：{WATCH_CHANNELS}"
+                  "（要别的通道请显式给 --channels）")
 
         cfg.data_dir = Path(args.data_dir or env.get("DATA_DIR", cfg.data_dir))
         cfg.poll_interval = args.interval or float(
@@ -720,7 +733,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--port", type=int, help="端口（默认 502）")
     p.add_argument("--transport", choices=["tcp", "pipe"], help="连接方式")
     p.add_argument("--pipe", help="管道名（transport=pipe 时用）")
-    p.add_argument("--channels", help="要盯的通道，逗号分隔；不填=自动发现全部")
+    p.add_argument("--channels",
+                   help="要盯的通道，逗号分隔；不填=只扫本项目自己的通道"
+                        f"（{WATCH_CHANNELS}），**不会**再去扫设备上别人的测试")
     p.add_argument("--data-dir", help="数据落盘根目录（默认 ./data）")
     p.add_argument("--interval", type=float, help="轮询间隔秒（默认 30）")
     p.add_argument("--timeout", type=float, help="单条命令超时秒（默认 30）")

@@ -41,8 +41,13 @@ DQDV_CYCLES = [1, 10, 50, 100, 200, 300]
 # ---------------------------------------------------------------------------
 
 def load_cell(data_dir: Path, channel: str, mass_mg: float,
-              dqdv_cycles: list[int] | None = None) -> dict:
-    """找该通道最新的数据目录（live 优先），算出报告需要的全部指标。"""
+              dqdv_cycles: list[int] | None = None,
+              source: str = "auto") -> dict:
+    """找该通道的数据目录并算出报告需要的全部指标。
+
+    source：auto=live 优先（进行中测试的新数据）；live=只取进行中；
+    official=只取已结束的正式数据集（两套报告都出，来源必须写明，见 report_build --source）。
+    """
     mass_g = mass_mg / 1000.0
     cands = []
     for root, kind in ((data_dir / "live", "live"), (data_dir, "official")):
@@ -53,6 +58,8 @@ def load_cell(data_dir: Path, channel: str, mass_mg: float,
                       if x.parts[-1].split("=")[1].isdigit())
         if tids:
             cands.append((d / f"testid={tids[-1]}", kind, tids[-1]))
+    if source in ("live", "official"):
+        cands = [c for c in cands if c[1] == source]
     if not cands:
         return {}
     # live（进行中的新数据）优先；否则正式
@@ -191,8 +198,17 @@ def load_cell(data_dir: Path, channel: str, mass_mg: float,
         except (json.JSONDecodeError, OSError):
             pass
     if not data_cutoff:
-        data_cutoff = done[-1]["cycle"] if done else None
-        data_cutoff = f"测试 {cands[0][2]} 的数据" if cands else None
+        # 正式数据集没有 progress.json：改读 meta.json 的采集时间，
+        # 让报告横幅能写"采集于 2026-09-25T13:52"，而不是"测试 247 的数据"这种糊话
+        meta = dd / "meta.json"
+        if meta.exists():
+            try:
+                data_cutoff = json.loads(
+                    meta.read_text(encoding="utf-8-sig")).get("collected_at")
+            except (json.JSONDecodeError, OSError):
+                data_cutoff = None
+    if not data_cutoff:
+        data_cutoff = f"测试 {cands[0][2]}（采集时间未记录）" if cands else None
 
     # ---- 实测电压窗口（从明细层现算）----
     # ★ 这里原来是写死的 "0.02~3.31 V"。那是另一批数据（正极 3.3 V 体系）的范围；
@@ -471,6 +487,29 @@ BLOCK_REFS = {
     "S34A": ("图 5 与图 6", None), "S34B": (None, "表 8"), "S34C": (None, None),
     "S35A": (None, "表 9"), "S35B": (None, "表 10"), "S35C": (None, None),
 }
+
+
+
+# 4.3 建议 与 5.2 展望的条目（引自协会《…第二版》对应章节，属项目既有结论，不是我们编的）
+SUGGESTIONS = {
+    "formulation_validation": ["每条件制备并测试不少于 3 颗平行样，取均值并给出误差棒",
+                               "系统探究添加剂的最佳添加浓度（0.5%、1%、2%、3% 梯度）",
+                               "探索与其它成膜添加剂的复配效果"],
+    "characterization": ["补做 EIS 电化学阻抗谱，量化界面膜阻抗与电荷转移阻抗",
+                         "开展 XPS、FTIR 等表面表征，明确 SEI 膜化学组成与结构",
+                         "用 DCIR 与变温测试拆分欧姆极化、电化学极化与浓差极化"],
+    "application": ["从半电池拓展到全电池（硬碳负极＋正极材料）",
+                    "测试 −20 ℃~60 ℃ 的温度适应性"],
+}
+OUTLOOK = {
+    "system_iteration": ["添加剂浓度梯度优化", "复配添加剂体系开发", "高电压正极适配性研究",
+                         "宽温域电解液配方开发", "低成本钠盐体系探索"],
+    "industrialization": ["大容量软包电池验证", "储能场景工况适配", "低温性能评估",
+                          "安全性能测试（热箱/穿刺）", "量产工艺兼容性评估"],
+    "deep_research": ["SEI 膜原位表征研究", "界面反应动力学模拟", "失效机制系统分析",
+                      "固态钠电池方向探索", "多尺度理论计算支撑"],
+}
+NEXT_STEPS = "平行样复测确认添加剂效应、EIS 与 XPS 机理表征、全电池初步验证三者同步推进"
 
 
 def split_notes(notes: list[str]) -> tuple[list[str], list[str]]:
@@ -758,14 +797,26 @@ def build_block_data(block_id: str, cells: dict[str, dict],
         base["phenomena_available"] = {k: v for k, v in _phenomena(cells, labels).items()}
         if not base["mechanism_kb"]:
             base["notes"].append("实验变量未提供 → 机制段无法取材，按降级标记输出")
-    elif block_id in ("S43A", "S43B", "S43C"):
-        base["suggestions"] = {"formulation_validation": None,
-                               "characterization": None, "application": None}
-        base["notes"].append("后续建议未提供（demo 阶段）")
-    elif block_id in ("S52A", "S52B", "S52C"):
-        base["outlook"] = {"system_iteration": None, "industrialization": None,
-                           "deep_research": None}
-        base["notes"].append("展望条目未提供（demo 阶段）")
+    elif block_id == "S43A":
+        base["suggestions"] = {"formulation_validation": SUGGESTIONS["formulation_validation"]}
+    elif block_id == "S43B":
+        base["suggestions"] = {"characterization": SUGGESTIONS["characterization"]}
+    elif block_id == "S43C":
+        base["suggestions"] = {"application": SUGGESTIONS["application"]}
+    elif block_id == "S43D":
+        base["next_steps"] = NEXT_STEPS
+    elif block_id == "S34C":
+        base["cycles_used"] = (ca.get("dqdv_cycles_drawn") or [])
+        base["cycles_missing"] = (ca.get("dqdv_cycles_missing") or [])
+        base["notes"].append("微分容量分析只取数据包给出的圈次，未做全循环连续追踪")
+    elif block_id == "S52A":
+        base["outlook"] = {"system_iteration": OUTLOOK["system_iteration"]}
+    elif block_id == "S52B":
+        base["outlook"] = {"industrialization": OUTLOOK["industrialization"]}
+    elif block_id == "S52C":
+        base["outlook"] = {"deep_research": OUTLOOK["deep_research"]}
+    elif block_id == "S52D":
+        base["closing"] = "Q④ 添加剂体系在醚类电解液中具备进一步研究的价值"
 
     # ---- P1b：图号/表号由**数据包**给出（不写死在提示词里）----
     base["figure_ref"], base["table_ref"] = BLOCK_REFS.get(block_id, (None, None))

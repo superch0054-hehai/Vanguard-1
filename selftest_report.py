@@ -35,11 +35,11 @@ WANT_FIGS = [
     "dQdV_1%Q④.svg",
 ]
 BLOCKS = ("S11", "S12", "S31A", "S31B", "S31C", "S32A", "S32B", "S32C", "S32D",
-          "S33A", "S33B", "S34A", "S34B", "S35A", "S35B", "S35C",
+          "S33A", "S33B", "S34A", "S34B", "S34C", "S35A", "S35B", "S35C",
           "S41A", "S41B", "S41C", "S41D",
           "S42INTRO", "S42A", "S42B", "S42C", "S42D", "S42E",
           "S43A", "S43B", "S43C", "S43D",
-          "S51A", "S51B", "S51C", "S52A", "S52B", "S52C")
+          "S51A", "S51B", "S51C", "S52A", "S52B", "S52C", "S52D")
 
 
 def make_fake_live_data() -> None:
@@ -66,6 +66,14 @@ def make_fake_live_data() -> None:
                         f"{i * 1000},{cyc},{v0 + (v1 - v0) * i / 5:.4f},{cur},"
                         f"{cap0 * i / 5:.6f},{cap0 * i / 5 * 2.5:.6f},34.9,[]")
         (d / "detail.csv").write_text("\n".join(rows) + "\n", encoding="utf-8")
+        # 另造一份"已结束的正式数据集"（同通道、更早的日期）：用来测 --source official
+        od = DATA / f"channel={ch}" / f"testid={tag[:-2]}0"
+        od.mkdir(parents=True, exist_ok=True)
+        (od / "detail.csv").write_text(chr(10).join(rows) + chr(10), encoding="utf-8")
+        (od / "progress.json").write_text(
+            json.dumps({"testid": tag[:-2] + "0", "rows_collected": n, "total_on_device": n,
+                        "updated_at": "2026-09-20T02:00:00" if tag.endswith("3")
+                        else "2026-09-25T02:00:00"}, ensure_ascii=False), encoding="utf-8")
         (d / "progress.json").write_text(
             json.dumps({"testid": tag, "rows_collected": n + 1, "total_on_device": n + 1,
                         "updated_at": "2026-10-02T02:00:29"}, ensure_ascii=False),
@@ -153,6 +161,115 @@ def test_validator(c: Checker) -> None:
          "★ 失败能生成 5-B 的回灌修复提示")
 
 
+
+def test_compose(c: Checker) -> None:
+    """填空式合成器：**程序填的全篇必须能过自己的校验器**（否则等于把错误写进报告）。
+
+    这条断言的分量在于它是端到端的：合成 → 校验 → 逐条规则，任何模板写错
+    （引用了数据里没有的数、方向写反、漏了 n=1 兜底）都会在这里露出来。
+    """
+    import shutil
+    tmp = TMP / "合成包"
+    if tmp.exists():
+        shutil.rmtree(tmp)
+    shutil.copytree(OUT, tmp)
+    sys.path.insert(0, str(HERE))
+    import compose_paragraphs as CP
+    import json as _json
+    # 用空段落目录，保证全部由合成器产出
+    shutil.rmtree(tmp / "段落")
+    (tmp / "段落").mkdir()
+    n, _ = CP.compose(tmp, "all", None)
+    c.ok(n >= 38, f"合成 {n} 段（覆盖全部需要正文的块）")
+    import validate_paragraphs as V
+    bad = {}
+    g = _json.loads((tmp / "global_context.json").read_text(encoding="utf-8-sig"))
+    for bid in sorted(CP.TEMPLATES):
+        p = tmp / "段落" / f"{bid}.txt"
+        bd = tmp / "block_data" / f"{bid}.json"
+        data = _json.loads(bd.read_text(encoding="utf-8-sig")) if bd.exists() else {}
+        hard, _ = V.check_block(bid, p.read_text(encoding="utf-8-sig"), data, g)
+        if hard:
+            bad[bid] = hard
+    c.ok(not bad, "★ 合成稿 100% 过校验器（模板写错就露馅）", str(bad)[:220])
+    txt = (tmp / "段落" / "S31A.txt").read_text(encoding="utf-8-sig")
+    c.ok("见图 1" in txt and "见图 图" not in txt, "★ 图号引用不重字（出过「见图 图 1」）", txt[-40:])
+    s34 = (tmp / "段落" / "S34A.txt").read_text(encoding="utf-8-sig")
+    c.ok("放电分支" in s34 and "充电分支" in s34, "S34A 充放两个分支都写了", s34[:60])
+
+
+
+def test_two_report_sets(c: Checker) -> None:
+    """两套报告：进行中（每日增量）与正式数据集，各有各的产物名与来源标注。
+
+    为什么要分两套：Agent 曾经拿同通道的**旧正式数据集**（247/244）当"当前电芯"，
+    比出"两颗不是平行样品"。两套都出、各自注明来源与截止时间，才不会互相冒充。
+    """
+    import subprocess as sp
+    out2 = TMP / "正式包"
+    r = sp.run([sys.executable, "report_build.py",
+                "--ch-a", "10-1", "--label-a", "STD",
+                "--ch-b", "10-2", "--label-b", "1%Q④",
+                "--mass-mg", "2", "--data-dir", str(DATA), "--source", "official",
+                "--out", str(out2), "--scaffold-dir", str(SCAFFOLD)],
+               cwd=str(HERE), capture_output=True, text=True, encoding="utf-8")
+    c.ok(r.returncode == 0, "★ 能用 --source official 建正式数据集的任务包",
+         (r.stderr or "")[-300:])
+    if r.returncode != 0:
+        return
+    g = json.loads((out2 / "global_context.json").read_text(encoding="utf-8-sig"))
+    c.ok(g.get("data_source") == "official", "上下文标注来源=official", str(g.get("data_source")))
+    c.ok("正式数据集" in (g.get("data_source_label") or ""),
+         "★ 来源标注写的是「正式数据集」（不是每日增量）", str(g.get("data_source_label")))
+    c.ok(bool(g.get("batch_warning")),
+         "★ 两份正式数据集采集日期不同 → 明确标注「不是同一次测试、不作横向对比」",
+         str(g.get("batch_warning")))
+    rr = sp.run([sys.executable, "render.py"], cwd=str(out2),
+                capture_output=True, text=True, encoding="utf-8")
+    c.ok(rr.returncode == 0, "正式集报告能渲染", (rr.stderr or "")[-200:])
+    h = (out2 / "SOH分析报告-正式数据集.html")
+    c.ok(h.exists(), "★ 正式集报告落到**另一个文件名**（不覆盖进行中那份）")
+    if h.exists():
+        html = h.read_text(encoding="utf-8")
+        c.ok("正式数据集" in html and "不是同一次测试" in html,
+             "★ 报告横幅里写明了来源与「非同批」")
+        c.ok(not (out2 / "SOH分析报告.html").exists(),
+             "正式集构建不会同时产出进行中那份（两套各自独立）")
+    # 进行中那份的横幅必须写明"每日增量"
+    live_html = (OUT / "SOH分析报告.html")
+    if live_html.exists():
+        c.ok("每日增量" in live_html.read_text(encoding="utf-8"),
+             "★ 进行中那份的横幅写明来源=每日增量")
+
+
+
+def test_docs_match_scripts(c: Checker) -> None:
+    """文档里点名的脚本必须真实存在，且不再推荐会毁数据的老命令。
+
+    为什么要这条：同一条流程曾被抄在 5 个文件里，代码一改文档就落后 —— 2026-10-04
+    实测"新入口 出报告.sh 在文档里出现 0 次"、而文档还在教 `--mode all`
+    （那条命令把 AI 写的 9 段冲回了模板句）。文档与代码的一致性得由测试看着。
+    """
+    docs = [SCAFFOLD / "任务说明.md", SCAFFOLD / "批量写作-3.6_4.2_4.3_5.2.md",
+            SCAFFOLD / "_system_prompt.txt"]
+    src = (HERE / "make_share.py").read_text(encoding="utf-8")     # 入口页文本在这里生成
+    text = chr(10).join(d.read_text(encoding="utf-8") for d in docs if d.exists()) + src
+    named = sorted(set(re.findall(r"(?:python3|bash)\s+([A-Za-z_][\w\-]*\.(?:py|sh))", text)))
+    c.ok(bool(named), "文档/入口页里点名了脚本", str(named))
+    for m in named:
+        c.ok((SCAFFOLD / m).exists() or (HERE / m).exists(),
+             f"★ 文档点名的脚本真实存在：{m}")
+
+    runbook = (SCAFFOLD / "任务说明.md").read_text(encoding="utf-8")
+    c.ok("出报告.sh" in runbook, "★ 任务说明给的是唯一入口 出报告.sh")
+    c.ok("--mode all" not in runbook,
+         "★ 任务说明不再推荐 --mode all（它曾把 AI 正文刷回模板句）")
+    c.ok("write_ai_sections" in runbook and "split_batch" in runbook,
+         "★ 任务说明写明了「AI 撰写」与「拆段过闸」两步")
+    for extra in (SCAFFOLD / "出报告.sh", SCAFFOLD / "write_ai_sections.py"):
+        c.ok(extra.exists(), f"脚手架里有 {extra.name}")
+
+
 def test_scaffold_in_sync(c: Checker) -> None:
     """脚手架里的 render.py 必须与主代码**逐字节一致**。
 
@@ -160,15 +277,17 @@ def test_scaffold_in_sync(c: Checker) -> None:
     才是真正跑起来的那个。今天一直是"改完手工 cp 过去"，一次忘掉就会出现
     "本地测试全绿、盒子上跑的是旧渲染脚本" —— 这种错从结果上看不出来。
     """
-    a = (HERE / "render.py").read_bytes()
-    b = (SCAFFOLD / "render.py").read_bytes()
-    c.ok(a == b, "★ 脚手架 render.py 与主代码逐字节一致（跑一句 cp render.py 报告任务_脚手架/）",
-         f"{len(a)} vs {len(b)} 字节")
+    for fn in ("render.py", "validate_paragraphs.py", "compose_paragraphs.py"):
+        a = (HERE / fn).read_bytes()
+        b = (SCAFFOLD / fn).read_bytes()
+        c.ok(a == b, f"★ 脚手架 {fn} 与主代码逐字节一致（跑一句 cp {fn} 报告任务_脚手架/）",
+             f"{len(a)} vs {len(b)} 字节")
 
 
 def main() -> int:
     c = Checker()
     test_scaffold_in_sync(c)
+    test_docs_match_scripts(c)
     test_validator(c)
 
     print(BAR)
@@ -289,6 +408,9 @@ def main() -> int:
     kept = sorted(p.stem for p in (OUT / "段落").glob("*.txt"))
     c.ok(kept == sorted(BLOCKS), f"★ 重建后 {len(BLOCKS)} 段正文全部保住（不再被 rmtree 冲掉）",
          f"只剩 {len(kept)} 段")
+
+    test_compose(c)
+    test_two_report_sets(c)
 
     print()
     print(BAR)

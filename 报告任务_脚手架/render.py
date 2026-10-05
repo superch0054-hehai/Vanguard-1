@@ -16,6 +16,7 @@
 
 import base64
 import json
+import os
 import re
 from pathlib import Path
 
@@ -36,7 +37,7 @@ TOC = [
 
 # 4.2 机制段：实验变量未知 → 降级为告警标记（诚实降级，不编造机制）
 S42_WARNING = "【本段未通过自动校验：实验变量信息未提供，作用机制无法推测，内容需人工复核】"
-NUM_H3 = {"S41A": "4.1.1", "S41B": "4.1.2", "S41C": "4.1.3",
+NUM_H3 = {"S41A": "4.1.1", "S41B": "4.1.2", "S41C": "4.1.3", "S41D": "4.1.4",
           "S42A": "4.2.1", "S42B": "4.2.2", "S42C": "4.2.3", "S42D": "4.2.4"}
 
 
@@ -75,7 +76,10 @@ def text_to_html(block_id, text):
     if not text.strip():
         return ""
     lines = text.strip().splitlines()
-    if block_id.startswith(("S41", "S42")) and lines:
+    # ★ S42INTRO / S42E 是整段句子（开场句、收尾句），**没有小标题行** ——
+    #   原先把它们也走 h3 分支，首句会被当成标题、还带一个空编号（实测）。
+    if (block_id.startswith(("S41", "S42"))
+            and block_id not in ("S42INTRO", "S42E") and lines):
         head = lines[0].strip()
         m = re.match(r"^(S\d+[A-Z]?)\s*(.*)$", head)
         if m and m.group(1) == block_id:      # 模型把块号写进了首行 → 剥掉
@@ -85,6 +89,7 @@ def text_to_html(block_id, text):
             return ("<h3>" + num + "  " + head + "</h3>\n"
                     + _body_html(lines[1:]))
     return _body_html(lines)
+
 
 
 def load_block(bid):
@@ -179,12 +184,19 @@ def render(ctx, labels):
     rep = ctx.get("report", {})
     out = tpl.replace("{{DOC_TITLE}}", rep.get("title", "电池测试数据分析报告"))
     out = out.replace("{{DOC_SUBTITLE}}", rep.get("subtitle", ""))
+    src_label = ctx.get("data_source_label") or "（来源未标注）"
     out = out.replace("{{DOC_META_SPANS}}",
-                      "<span>报告生成：{}</span><span>数据截至：进行中测试的每日增量</span>"
-                      .format(ctx.get("generated", "")))
-    out = out.replace("{{DOC_NOTE}}",
-                      "阶段性报告：测试仍在进行；活性物质质量为暂定值 2 mg；"
-                      "效率口径为放电÷充电（方向以程序给出的数据为准）。")
+                      "<span>报告生成：{}</span><span>数据来源：{}</span>"
+                      .format(ctx.get("generated", ""), src_label))
+    note = ("活性物质质量为暂定值 2 mg；效率口径为充电÷放电（负极半电池，"
+            "方向以程序给出的数据为准）。")
+    if ctx.get("data_source") == "live":
+        note = "阶段性报告：测试仍在进行（每日增量）。" + note
+    elif ctx.get("data_source") == "official":
+        note = "本报告基于已结束的正式数据集。" + note
+    if ctx.get("batch_warning"):
+        note = "⚠️ " + ctx["batch_warning"] + "。" + note
+    out = out.replace("{{DOC_NOTE}}", note)
     out = out.replace("{{TOC_TREE}}",
                       "".join('<li class="l1">' + top + "<ul>"
                               + "".join('<li class="l2">' + s + "</li>" for s in subs)
@@ -322,8 +334,15 @@ def main():
     v = ctx.get("variable", {})
     labels = [v.get("control_short", ""), v.get("experimental_short", "")]
     html = render(ctx, labels)
-    dst = HERE / "SOH分析报告.html"
-    dst.write_text(html, encoding="utf-8")
+    # 两套报告不互相覆盖：进行中 → SOH分析报告.html；正式数据集 → 加后缀
+    name = ("SOH分析报告-正式数据集.html" if ctx.get("data_source") == "official"
+            else "SOH分析报告.html")
+    dst = HERE / name
+    # ★ 原子替换：Agent 以 root 写过的报告文件，admin 直接 write_text 会 PermissionError；
+    #   改名/删除看的是目录写权限（目录是我们自己的），所以走 tmp + os.replace 一定成功。
+    tmp = dst.with_suffix(".html.tmp")
+    tmp.write_text(html, encoding="utf-8")
+    os.replace(tmp, dst)
     print("  已生成:", dst)
     return 0
 

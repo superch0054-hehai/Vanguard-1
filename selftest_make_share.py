@@ -153,6 +153,48 @@ class Checker:
         return 1 if self.failed else 0
 
 
+
+def test_agent_entry(c: Checker) -> None:
+    """共享目录**根**必须有一页纸，把"要出报告走哪条路"写死。
+
+    实测病根（2026-10-03）：`报告任务`/`任务说明` 在整个共享目录里 grep 命中 0 次，
+    Agent 于是自己找 CSV 写了一份报告，还用错数据集（同通道的旧测试 247/244）。
+    路由只能写进它一进门就会读的文件里。
+    """
+    for fn in ("AGENTS.md", "00-先读我.md"):
+        p = SHARE / fn
+        c.ok(p.exists(), f"根入口 {fn} 生成了")
+    entry = (SHARE / "AGENTS.md").read_text(encoding="utf-8")
+    c.ok("报告任务/任务说明.md" in entry, "★ 入口指向了 报告任务/任务说明.md")
+    # ★ 2026-10-04 改：流程**只留一处**（任务说明.md），入口页只给一条命令 + 优先级声明。
+    #   原来入口页把流程抄了一遍，结果代码一改文档就落后（新入口在文档里出现 0 次）。
+    c.ok("bash 出报告.sh" in entry, "★ 入口给的是**一条命令**（出报告.sh）")
+    c.ok("唯一出处" in entry or "以它为准" in entry, "★ 入口声明了优先级：冲突时以任务说明为准")
+    c.ok("任务说明.md" in entry, "入口指向任务说明.md")
+    c.ok("不要" in entry and "另写" in entry, "★ 入口明确禁止自己另写报告文件")
+    c.ok("SOH分析报告.html" in entry and "报告任务-正式数据集" in entry,
+         "入口写明了**两套**报告的落点")
+    c.ok("263" in entry, "入口列了当前进行中的测试号（夹具里是 live/testid=263）")
+    c.ok("旧测试" in entry, "入口提醒了 247/244 是旧测试")
+
+    idx = (SHARE / "datasets.md").read_text(encoding="utf-8")
+    c.ok("报告任务/任务说明.md" in idx, "★ 索引顶部也指向报告入口")
+    c.ok("已结束的正式数据集" in idx, "★ 索引把正式数据集标成「已结束」")
+    c.ok("已被 live/testid=" in idx, "★ 索引里标了「已被 live 取代」")
+    c.ok("进行中的测试在 `live/`" in idx, "★ 索引把 live 排在最前说明")
+
+    rd = (SHARE / "README.md").read_text(encoding="utf-8")
+    c.ok("要出分析报告（SOH 报告）" in rd, "★ README 第一屏就有报告路由段")
+    c.ok("报告任务/" in rd, "README 目录结构里有 报告任务/")
+    # 夹具里 live 挂在 channel 27-188-10-2，所以同通道的正式数据集 244 应被标注
+    sm = next(SHARE.glob("channel=27-188-10-2/testid=244/summary.md"), None)
+    c.ok(sm is not None and "这是旧测试" in sm.read_text(encoding="utf-8"),
+         "★ 同通道有 live 的旧数据集，summary 顶部带「旧测试」横幅")
+    sm2 = next(SHARE.glob("channel=27-188-10-1/testid=247/summary.md"), None)
+    c.ok(sm2 is not None and "这是旧测试" not in sm2.read_text(encoding="utf-8"),
+         "同通道没有 live 的数据集不加该横幅（别误标）")
+
+
 def main() -> int:
     make_fake_data()
     if SHARE.exists():
@@ -382,10 +424,17 @@ def main() -> int:
         t = readme.read_text(encoding="utf-8")
         c.ok("与正式数据集的 detail.csv 完全一致" in t,
              "★ 说明里写清了列格式与正式一致（口径不掺水）")
-        c.ok("正式结论、给协会的报告一律以正式数据集为准" in t,
-             "★ 说明了 live 只用于观察趋势，结论以正式数据集为准")
+        # ★ 口径（2026-10-03 改）：live **可以**出阶段性报告（注明来源与截止时间），
+        #   正式结论以测试结束后的完整采集为准。原来说"不要拿 live 的数下结论"，
+        #   把 Agent 直接推离了 live —— 而我们自己的报告用的正是 live。
+        c.ok("可以据此出阶段性报告" in t,
+             "★ 说明了 live 可以出阶段性报告（须注明来源与截止时间）")
+        c.ok("不要拿 live 里的数下结论" not in t,
+             "★ 那句把 Agent 推离 live 的旧话已删掉")
+        c.ok("旧测试" in t, "★ 提醒了上一级的 247/244 是旧测试")
         c.ok("rows_collected" in t and "水位" in t, "解释了水位字段")
         c.ok("6597" in t, "列出了当前进行中的测试（6597 行那个）")
+    test_agent_entry(c)
     c.ok(not (SHARE / "live" / "channel=27-188-10-3").exists(),
          "★ 损坏的水位条目被跳过（没把坏数据共享出去）")
     # 主 README 的目录树也要提到 live

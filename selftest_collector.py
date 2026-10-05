@@ -269,6 +269,26 @@ def test_incremental(c: Checker) -> None:
     print(f"  （live 区结构：{d.parent}）")
 
 
+
+def test_watch_channels(c: Checker) -> None:
+    """不填 --channels 时**只准扫本项目这六颗**。
+
+    钉住的事故（2026-10-03）：手动跑 `--incremental-now` 不带 `--channels`，
+    旧默认是「自动发现设备上全部通道」，于是把**别人 58 个通道**的测试数据
+    全拉进了 data/live/（255 MB）。别人的测试一概不该碰。
+    """
+    import collector as COL
+    c.ok(COL.WATCH_CHANNELS == "27-188-10-1,27-188-10-2,27-188-10-3,"
+                               "27-188-10-6,27-188-10-7,27-188-10-8",
+         "★ 默认通道清单就是本项目六颗", COL.WATCH_CHANNELS)
+    ns = COL.build_parser().parse_args(["--incremental-now"])
+    c.ok(getattr(ns, "channels", None) is None,
+         "解析后 channels 为空 → 由 WATCH_CHANNELS 兜底（不是「全部通道」）")
+    raw = ns.channels or COL.WATCH_CHANNELS
+    c.ok([x.strip() for x in raw.split(",") if x.strip()] == COL.WATCH_CHANNELS.split(","),
+         "★ 实际生效的通道 = 六颗（1/2/3 + 6/7/8）")
+
+
 def main() -> int:
     if OUT.exists():
         shutil.rmtree(OUT)
@@ -369,6 +389,7 @@ def main() -> int:
     print()
     print(BAR)
     print("验证：")
+    test_watch_channels(c)
     rc = c.report()
 
     print()

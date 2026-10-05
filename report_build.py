@@ -51,6 +51,9 @@ def main() -> int:
     p.add_argument("--label-a", default=None, help="样品 A 的图例名（默认通道号）")
     p.add_argument("--label-b", default=None, help="样品 B 的图例名（默认通道号）")
     p.add_argument("--data-dir", default="./data")
+    p.add_argument("--source", choices=["auto", "live", "official"], default="auto",
+                   help="数据来源：auto=live 优先；live=只用进行中的每日增量；"
+                        "official=只用已结束的正式数据集（两套报告都出，各自注明来源）")
     p.add_argument("--mass-mg", default="2",
                    help="活性物质质量 mg：一个值两通道共用，或逗号分隔各给各的（默认 2）")
     p.add_argument("--nominal-mah", type=float, default=None,
@@ -64,6 +67,9 @@ def main() -> int:
                    help="重建时保留任务包里 Agent 已写的 段落/（默认开）")
     p.add_argument("--no-keep-paragraphs", dest="keep_paragraphs", action="store_false",
                    help="丢弃已有 段落/（只在确认要全部重写时用）")
+    p.add_argument("--compose", choices=["off", "missing", "all"], default="off",
+                   help="填空式正文合成（5-D 主路径）：off=不由程序填（让 Agent 写）；"
+                        "missing=只补空缺；all=全部用合成稿覆盖。**秒级出全篇**")
     p.add_argument("--paragraphs-from", default=None,
                    help="段落种子目录：把里面的 *.txt 拷进新任务包的 段落/"
                         "（用于从备份恢复；任务包自己的 段落/ 优先）")
@@ -89,7 +95,8 @@ def main() -> int:
     for entry, label in ((args.ch_a, args.label_a or args.ch_a),
                          (args.ch_b, args.label_b or args.ch_b)):
         key = normalize_channel(entry)
-        cell = RP.load_cell(data_dir, key, mass_parts[len(cells)], dqdv_cycles)
+        cell = RP.load_cell(data_dir, key, mass_parts[len(cells)], dqdv_cycles,
+                            args.source)
         if not cell:
             print(f"  ❌ 通道 {entry}：找不到数据目录。"
                   "该通道得有测试数据（live 或正式），才能进对比报告。", file=sys.stderr)
@@ -110,6 +117,29 @@ def main() -> int:
     ctx = RP.build_global_context(labels, cells, mass_parts[0], generated)
     cutoff = max((c.get("progress_updated") or "" for c in cells.values()))
     ctx["data_cutoff"] = cutoff or generated
+    # ---- 数据来源标注（两套报告都出：必须让读者一眼看出这份是哪套）----
+    kinds = sorted({c.get("kind") or "?" for c in cells.values()})
+    if len(kinds) > 1:
+        print(f"  ⚠️  两颗电芯用的数据来源不一致：{kinds} —— "
+              "报告里会如实标注，横向对比请谨慎看", file=sys.stderr)
+    ctx["data_source"] = kinds[0] if len(kinds) == 1 else "mixed"
+    import re as _re2
+    _cut = str(ctx["data_cutoff"])
+    _ts = bool(_re2.match(r"\d{4}-\d{2}-\d{2}", _cut))
+    ctx["data_source_label"] = {
+        "live": f"每日增量（进行中测试，数据截至 {_cut}）",
+        "official": (f"正式数据集（测试已结束，采集于 {_cut}）" if _ts
+                     else f"正式数据集（测试已结束；{_cut}）"),
+        "mixed": "两颗电芯来源不一致（一颗进行中、一颗正式）—— 不作横向对比",
+    }.get(ctx["data_source"], "（来源未标注）")
+    # 正式数据集里两颗若不是同一次测试，明确写"非同批"（实测踩过：旧正式集 10-1 只有 1 圈）
+    if ctx["data_source"] == "official":
+        import re as _re
+        days = {_re.sub(r"T.*", "", str(c.get("progress_updated") or ""))
+                for c in cells.values()}
+        if len(days) > 1:
+            ctx["batch_warning"] = ("两份正式数据集的采集日期不同，**不是同一次测试**，"
+                                    "本报告只作单颗参考，不作横向对比")
 
     # ---- 3. 六张图（模板的 FIGURE:1..6）----
     # 图 1 长循环 / 图 2 首效VQ / 图 3 平均电压 / 图 4 倍率 / 图 5、6 dQ/dV（每样品一张）
@@ -205,11 +235,11 @@ def main() -> int:
     bd.mkdir(exist_ok=True)
     n = 0
     for bid in ("S11", "S12", "S31A", "S31B", "S31C", "S32A", "S32B", "S32C",
-                "S32D", "S33A", "S33B", "S34A", "S34B", "S35A", "S35B", "S35C",
+                "S32D", "S33A", "S33B", "S34A", "S34B", "S34C", "S35A", "S35B", "S35C",
                 "S41A", "S41B", "S41C", "S41D",
                 "S42INTRO", "S42A", "S42B", "S42C", "S42D", "S42E",
                 "S43A", "S43B", "S43C", "S43D",
-                "S51A", "S51B", "S51C", "S52A", "S52B", "S52C"):
+                "S51A", "S51B", "S51C", "S52A", "S52B", "S52C", "S52D"):
         d = RP.build_block_data(bid, cells, ctx, labels)
         (bd / f"{bid}.json").write_text(
             json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -219,6 +249,13 @@ def main() -> int:
     fig_dir.mkdir(exist_ok=True)
     for fname, fig in figs.items():
         (fig_dir / f"{fname}.svg").write_text(fig.svg(), encoding="utf-8")
+
+    # ---- 4b. 填空式正文（可选）：程序把"数据句"直接填好 ----
+    if args.compose != "off":
+        import compose_paragraphs as CP
+        n, skipped = CP.compose(out, args.compose, None)
+        print(f"  ✍  合成正文 {n} 段" + (f"（跳过已有 {len(skipped)} 段）" if skipped else "")
+              + "　→ 再跑 validate_paragraphs.py 过闸")
 
     # ---- 任务说明里的数据截止时间换成动态的 ----
     ts = out / "任务说明.md"

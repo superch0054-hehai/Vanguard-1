@@ -44,6 +44,20 @@ DIR_KEYWORDS = {
 
 NUM_RE = re.compile(r"\d+(?:\.\d+)?")
 
+# ★ AI 写的段落里**允许**出现的数字（其余一律不许 —— 数字只留在程序段里）：
+#   章节号、图表号、变量定义（1 wt%）、样本量口径（n = 1 / 单颗）。测试结果类数值
+#   （容量/效率/ΔV/峰位/圈数…）必须由程序段承载，AI 要引用就写"见表 X"。
+AI_DIGIT_OK = [
+    r"[图表]\s*\d+",              # 图 3 / 表 4
+    r"\d+(?:\.\d+)*\s*[章节]",     # 4.1 节 / 2.3 节
+    r"\d+\.\d+\.\d+",           # 4.1.1 这类编号
+    r"1\s*wt\s*%",                  # 添加量（变量定义，不是测量值）
+    r"n\s*_?\s*parallel\s*=\s*1", # 样本量口径
+    r"n\s*=\s*1",
+    r"1\s*颗",                       # "每条件 1 颗"
+]
+AI_SECTION = re.compile(r"\d+\.\d+")
+
 
 def _numbers(text: str) -> list[str]:
     return NUM_RE.findall(text)
@@ -89,7 +103,39 @@ def _structural(text: str) -> set[str]:
     return s
 
 
-def check_block(bid: str, para: str, data: dict, ctx: dict) -> tuple[list[str], list[str]]:
+# 建议(4.3)/展望(5.2)是**固定提案清单**：里面的浓度梯度、温区是方案参数，不是测试结果，
+# 允许照写（0.5~3%、−20~60 ℃ 这类）；判"不许写测试数值"只对 3.6/4.1/4.2 这三章生效。
+AI_DIGIT_BLOCKS = ("S35", "S41", "S42")
+
+
+def _ai_digit_violation(text: str, ctx: dict | None = None,
+                        data: dict | None = None) -> list[str]:
+    """返回 AI 段里"不该出现的数字"（去掉白名单后剩下的）。
+
+    ⚠️ 白名单必须包含**样品名与添加量**：实测 AI 写"STD 组略高于 1%Q4 组"，
+    其中的 1、4 被当成测试数值误报（14 段全红）。样品名是变量定义，不是测量值。
+    """
+    clean = text
+    # 样品名（1%Q④ / STD 这类）与添加量先剥掉 —— 它们来自 global_context，是变量定义
+    var = (ctx or {}).get("variable") or {}
+    for lab in (var.get("control_short"), var.get("experimental_short"),
+                var.get("experimental_dosage")):
+        if lab:
+            clean = clean.replace(str(lab), " ")
+            clean = clean.replace(str(lab).replace("④", "4"), " ")
+            clean = clean.replace(str(lab).replace("④", ""), " ")
+            clean = clean.replace(str(lab).replace("%", "％"), " ")
+    # 机制段的"现象短语"是**给定素材**（如"稳态 CE 贴近 100%"），必须原样引用 → 先剥掉
+    for g in (data.get("mechanism_kb") or []) if isinstance(data, dict) else []:
+        for ph in (g.get("matched_phenomena") or []):
+            clean = clean.replace(str(ph), " ")
+    for pat in list(AI_DIGIT_OK) + [r"\d+\s*%\s*[Qq][④4]?", r"\d+\s*％\s*[Qq][④4]?"]:
+        clean = re.sub(pat, " ", clean)
+    return sorted(set(NUM_RE.findall(clean)))
+
+
+def check_block(bid: str, para: str, data: dict, ctx: dict,
+                ai_written: bool = False) -> tuple[list[str], list[str]]:
     """→ (硬性失败原因, 告警)。空列表 = 该块通过。"""
     hard: list[str] = []
     warn: list[str] = []
@@ -146,12 +192,23 @@ def check_block(bid: str, para: str, data: dict, ctx: dict) -> tuple[list[str], 
             hard.append(f"{kind}号引用越界：正文用了 {sorted(used)}，数据包只给了 {ref}")
 
     # 5-A#4 n=1 结论句
-    if bid.startswith(N1_BLOCKS) and not any(w in text for w in N1_WORDS):
+    # 例外：S42INTRO 是 4.2 的**开场句**（一句话引出），口径由配对的收尾句 S42E 承载 ——
+    # 强制一句开场白也写"需复测"会把句子撑成病句（实测试了两轮模型都写不进去）。
+    if (bid.startswith(N1_BLOCKS) and bid != "S42INTRO"
+            and not any(w in text for w in N1_WORDS)):
         hard.append("n=1 结论句缺失（需含 波动范围/复测/需验证/可能）")
 
     # 5-A#5 机制措辞
     if bid.startswith(MECH_BLOCKS) and not any(w in text for w in MECH_WORDS):
         hard.append("机制措辞缺失（需含 可能/推测/提示）")
+
+    # ★ 分工纪律：AI 只写判断，数字归程序段（2026-10-04 定的路线）
+    if ai_written:
+        bad_digits = (_ai_digit_violation(text, ctx, data)
+                      if bid.startswith(AI_DIGIT_BLOCKS) else [])
+        if bad_digits:
+            hard.append("AI 段里不该出现测试数值：" + "、".join(bad_digits[:6])
+                        + "（数字由程序段承载；要引用就写「见表 X」/「见图 X」）")
 
     # 5-B 方向一致性：方向字段说"减小"，正文就不能写"增大"
     for field, kws in DIR_KEYWORDS.items():
@@ -215,12 +272,20 @@ def main() -> int:
         print(f"❌ 不是任务包目录（缺 段落/ 或 block_data/）：{pkg}", file=sys.stderr)
         return 1
 
+    # 出处台账（split_batch.py 落的）：AI 段适用"不许写数值"的规则
+    try:
+        _led = json.loads((para_dir / "_来源.json").read_text(encoding="utf-8-sig"))
+        ai_blocks = {k for k, v in _led.items() if str(v).upper().startswith("AI")}
+    except (OSError, ValueError):
+        ai_blocks = set()
+
     failed, warned, ok = {}, {}, 0
     for p in sorted(para_dir.glob("*.txt")):
         bid = p.stem
         bd_p = bd_dir / f"{bid}.json"
         data = json.loads(bd_p.read_text(encoding="utf-8-sig")) if bd_p.exists() else {}
-        hard, warn = check_block(bid, p.read_text(encoding="utf-8-sig"), data, ctx)
+        hard, warn = check_block(bid, p.read_text(encoding="utf-8-sig"), data, ctx,
+                                 ai_written=bid in ai_blocks)
         if hard:
             failed[bid] = {"reasons": hard, "repair": repair_prompt(bid, hard)}
         else:
@@ -247,6 +312,8 @@ def repair_prompt(bid: str, reasons: list[str]) -> str:
     lines = ["【修正任务】你上一次的输出存在以下问题："]
     lines += [f" {i + 1}) {r}；" for i, r in enumerate(reasons)]
     lines += ["请重写本段，并严格遵守：",
+              "- **不要写任何测试数值**（容量/效率/保持率/ΔV/峰位/圈数等）；"
+              "数字由程序段承载，要引用就写「见表 X」或「见图 X」；",
               "- 只使用【本块数据】中出现的数值，不要做加减乘除；",
               "- 方向（增大/减小、上升/下降）必须与数据包给出的方向字段一致；",
               "- 不使用“显著、证明、大幅、最优”等词；",
