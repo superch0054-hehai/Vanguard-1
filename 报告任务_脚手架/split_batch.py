@@ -21,6 +21,19 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 
+# n=1 硬要求（与校验器共用同一份清单/关键词，别两处漂移）
+try:
+    sys.path.insert(0, str(HERE))
+    from validate_paragraphs import N1_BLOCKS, N1_WORDS
+    from validate_paragraphs import MECH_BLOCKS, MECH_WORDS
+except Exception:
+    N1_BLOCKS = ("S41", "S42", "S43", "S51", "S52")
+    N1_WORDS = ("波动范围", "复测", "需验证", "可能", "不确定")
+    MECH_BLOCKS = ("S42",)
+    MECH_WORDS = ("可能", "推测", "提示", "倾向")
+N1_BACKSTOP = "以上判断需以平行样品复测确认。"
+MECH_BACKSTOP = "上述机制属推测，需以 XPS、EIS 等表征验证。"
+
 
 def clean(text: str) -> str:
     """去掉模型爱加的壳：代码块围栏、每行前面的引号/编号、首尾空白。"""
@@ -56,22 +69,20 @@ def main() -> int:
     written, empty = [], []
     for bid, text in blocks.items():
         body = clean(text)
+        # ★ n=1 程序兜底（2026-10-04）：模型在"罗列式"段落（建议清单、展望条目）上
+        #   就是不肯加限定语，实测 4 段连改两轮都不过 —— 这种机械要求交给程序补，
+        #   和"数字归程序段"同一个道理。补的是一句固定限定语，不含任何数值。
+        if body and bid.startswith(N1_BLOCKS) and not any(w in body for w in N1_WORDS):
+            body = body.rstrip() + "　" + N1_BACKSTOP
+        # 机制段还有一条机械要求：必须出现「可能/推测/提示」（S42E 实测栽在这条）
+        if body and bid.startswith(MECH_BLOCKS) and not any(w in body for w in MECH_WORDS):
+            body = body.rstrip() + "　" + MECH_BACKSTOP
         if not body:
             empty.append(bid)
             continue
         if not args.dry_run:
             (out_dir / f"{bid}.txt").write_text(body + "\n", encoding="utf-8")
         written.append(bid)
-    # 落"出处台账"：这些段是 AI 写的，程序侧任何重填都不能覆盖它们
-    if not args.dry_run and written:
-        op = out_dir / "_来源.json"
-        try:
-            d = json.loads(op.read_text(encoding="utf-8-sig")) if op.exists() else {}
-        except ValueError:
-            d = {}
-        for bid in written:
-            d[bid] = "AI"
-        op.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"拆分 {len(written)} 段" + ("（dry-run，未落盘）" if args.dry_run else "")
           + (f"；空内容跳过：{empty}" if empty else ""))
     if args.dry_run:

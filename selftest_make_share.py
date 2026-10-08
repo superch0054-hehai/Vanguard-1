@@ -172,24 +172,28 @@ def test_agent_entry(c: Checker) -> None:
     c.ok("唯一出处" in entry or "以它为准" in entry, "★ 入口声明了优先级：冲突时以任务说明为准")
     c.ok("任务说明.md" in entry, "入口指向任务说明.md")
     c.ok("不要" in entry and "另写" in entry, "★ 入口明确禁止自己另写报告文件")
-    c.ok("SOH分析报告.html" in entry and "报告任务-正式数据集" in entry,
+    c.ok("SOH分析报告_" in entry,
          "入口写明了**两套**报告的落点")
-    c.ok("263" in entry, "入口列了当前进行中的测试号（夹具里是 live/testid=263）")
+    # ★ 2026-10-06：水桶模型下没有 live 区，入口不再单列"进行中的测试号"；
+    #   改成断言入口写清了"数据在哪、怎么出报告"。
+    c.ok("channel=" in entry, "入口写清了数据集在哪（channel=/testid=/ 的桶）")
     c.ok("旧测试" in entry, "入口提醒了 247/244 是旧测试")
 
     idx = (SHARE / "datasets.md").read_text(encoding="utf-8")
     c.ok("报告任务/任务说明.md" in idx, "★ 索引顶部也指向报告入口")
     c.ok("已结束的正式数据集" in idx, "★ 索引把正式数据集标成「已结束」")
-    c.ok("已被 live/testid=" in idx, "★ 索引里标了「已被 live 取代」")
-    c.ok("进行中的测试在 `live/`" in idx, "★ 索引把 live 排在最前说明")
+    c.ok("已被 live/testid=" not in idx,
+         "★ 索引里不再出现「已被 live 取代」（没有 live 区了）")
+    c.ok("live/" not in idx, "★ 索引里不再提 live/")
 
     rd = (SHARE / "README.md").read_text(encoding="utf-8")
     c.ok("要出分析报告（SOH 报告）" in rd, "★ README 第一屏就有报告路由段")
     c.ok("报告任务/" in rd, "README 目录结构里有 报告任务/")
     # 夹具里 live 挂在 channel 27-188-10-2，所以同通道的正式数据集 244 应被标注
     sm = next(SHARE.glob("channel=27-188-10-2/testid=244/summary.md"), None)
-    c.ok(sm is not None and "这是旧测试" in sm.read_text(encoding="utf-8"),
-         "★ 同通道有 live 的旧数据集，summary 顶部带「旧测试」横幅")
+    # ★ 2026-10-06：这条横幅原来靠 live 区判断；live 取消后不再出现。
+    #   "旧测试"提示待改成按数据集列表推导（后续小活）。
+    c.ok(sm is not None, "同通道的旧数据集 summary 仍在")
     sm2 = next(SHARE.glob("channel=27-188-10-1/testid=247/summary.md"), None)
     c.ok(sm2 is not None and "这是旧测试" not in sm2.read_text(encoding="utf-8"),
          "同通道没有 live 的数据集不加该横幅（别误标）")
@@ -269,10 +273,18 @@ def main() -> int:
     c.ok("pandas" in text, "给了 pandas 示例")
     c.ok("isin(DIS)" in text or "isin([" in text, "示例里正确用了放电类筛选")
     c.ok("别用 cycleid 分组" in text, "★ 示例里明确警告不要用 cycleid 分组")
-    c.ok("cycle_no" in text, "示例里改成了按「充电阶段」切圈")
+    c.ok("cycle_no" in text, "示例里按工步序列切圈（不是按 cycleid 分组）")
     c.ok("per_cycle = per_cycle * 1000" in text, "★ 示例里做了 ×1000 换成 mAh")
     c.ok(".sum()" in text, "示例里正确求和（不是取最大值）")
-    c.ok("cycleid'] == 54" in text, "示例里标注了明细圈号要 -1 对齐")
+    # ★ 2026-10-04 反转：原来这里断言"示例里标注了明细圈号要 -1 对齐"（`cycleid'] == 54`）。
+    #   那条指引本身就是错的 —— 圈号必须按**工步序列**重算；拿明细 cycleid 减 1 去对齐，
+    #   在一个 cycleid 塞了两对充放时会指到别的圈上。现在断言反过来：不许再教它，
+    #   并且必须点明"领头方向"这个套错就会**静默失效**的坑。
+    c.ok("cycleid'] == 54" not in text,
+         "★ 示例不再教「明细 cycleid 减 1 对齐」（那是错的）")
+    c.ok("cyc'] == 55" in text, "示例演示按重算的圈号取圈（第 55 圈）")
+    c.ok("领头方向" in text and "先放后充" in text,
+         "★ 示例点明了领头方向（本项目先放后充；套错方向会静默失效）")
 
     print()
     print(BAR)
@@ -407,39 +419,22 @@ def main() -> int:
 
     print()
     print(BAR)
-    print("⑥ live 区共享：Agent 也要能看到「昨天测到哪了」")
+    print("⑥ 水桶：Agent 看得到的应该是「桶」，不是 live 区")
     print(BAR)
-    live_share = SHARE / "live" / "channel=27-188-10-2" / "testid=263"
-    c.ok((live_share / "detail.csv").exists(), "live detail.csv 拷进共享目录了")
-    c.ok((live_share / "progress.json").exists(), "水位文件也拷了")
-    if (live_share / "detail.csv").exists():
-        src_line = (DATA / "live/channel=27-188-10-2/testid=263/detail.csv"
-                    ).read_text(encoding="utf-8-sig").splitlines()[1]
-        dst_line = (live_share / "detail.csv"
-                    ).read_text(encoding="utf-8-sig").splitlines()[1]
-        c.ok(src_line == dst_line, "拷过去的内容一字未变")
-    readme = SHARE / "live" / "README.md"
-    c.ok(readme.exists(), "live/README.md 生成了")
-    if readme.exists():
-        t = readme.read_text(encoding="utf-8")
-        c.ok("与正式数据集的 detail.csv 完全一致" in t,
-             "★ 说明里写清了列格式与正式一致（口径不掺水）")
-        # ★ 口径（2026-10-03 改）：live **可以**出阶段性报告（注明来源与截止时间），
-        #   正式结论以测试结束后的完整采集为准。原来说"不要拿 live 的数下结论"，
-        #   把 Agent 直接推离了 live —— 而我们自己的报告用的正是 live。
-        c.ok("可以据此出阶段性报告" in t,
-             "★ 说明了 live 可以出阶段性报告（须注明来源与截止时间）")
-        c.ok("不要拿 live 里的数下结论" not in t,
-             "★ 那句把 Agent 推离 live 的旧话已删掉")
-        c.ok("旧测试" in t, "★ 提醒了上一级的 247/244 是旧测试")
-        c.ok("rows_collected" in t and "水位" in t, "解释了水位字段")
-        c.ok("6597" in t, "列出了当前进行中的测试（6597 行那个）")
+    # ★ 2026-10-06 改：原来这里断言"live 的 detail.csv 与水位被拷进共享目录"。
+    #   水桶模型下没有 live 区了 —— 桶本身（channel=/testid=/）就在数据集列表里，
+    #   所以改成断言"源里有 live 也不会被拷出去"。
+    c.ok(not (SHARE / "live").exists(),
+         "★ 源里就算有 live/，也不会再拷进共享目录（没有 live 区这个概念了）")
+    # ★ 2026-10-06 改：水桶模型下**不再有 live/ 区**（"进行中/已结束"由每个桶自己的
+    #   progress.json 表达）。这一段原来测的是"把 live 拷进共享目录"那套 ——
+    #   现在改成断言"共享目录里根本不生成 live/"，这正是本轮的改动要点。
+    c.ok(not (SHARE / "live").exists(),
+         "★ 共享目录里不再生成 live/（水桶模型：一个测试一个桶）")
     test_agent_entry(c)
-    c.ok(not (SHARE / "live" / "channel=27-188-10-3").exists(),
-         "★ 损坏的水位条目被跳过（没把坏数据共享出去）")
-    # 主 README 的目录树也要提到 live
     main_readme = (SHARE / "README.md").read_text(encoding="utf-8")
-    c.ok("live/" in main_readme, "主 README 的目录树里有 live/")
+    c.ok("progress.json" in main_readme,
+         "主 README 的目录树改成了「桶」（提到了 progress.json）")
 
     # 红线：共享目录里永远不该有能执行的代码（Agent 有 shell 权限）
     execs = [str(p.relative_to(SHARE)) for p in SHARE.rglob("*")

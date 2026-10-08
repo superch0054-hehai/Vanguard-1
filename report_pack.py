@@ -42,31 +42,71 @@ DQDV_CYCLES = [1, 10, 50, 100, 200, 300]
 
 def load_cell(data_dir: Path, channel: str, mass_mg: float,
               dqdv_cycles: list[int] | None = None,
-              source: str = "auto") -> dict:
+              source: str = "auto",
+              testid: int | None = None) -> dict:
     """找该通道的数据目录并算出报告需要的全部指标。
 
     source：auto=live 优先（进行中测试的新数据）；live=只取进行中；
     official=只取已结束的正式数据集（两套报告都出，来源必须写明，见 report_build --source）。
+    testid：指定用哪一个测试。不给就取**最新的那个**（= 该通道当前在跑的测试）。
     """
     mass_g = mass_mg / 1000.0
+    # 先按来源筛掉不看的那些根，再在剩下的根里找 —— 否则会出现
+    # "live 里明明有 264、却因为在 official 里找不到而误报没有"（2026-10-04 实测踩到）。
+    roots = [(data_dir / "live", "live"), (data_dir, "official")]
+    if source in ("live", "official"):
+        roots = [r for r in roots if r[1] == source]
     cands = []
-    for root, kind in ((data_dir / "live", "live"), (data_dir, "official")):
+    avail: list[int] = []
+    for root, kind in roots:
         d = root / f"channel={channel}"
         if not d.is_dir():
             continue
         tids = sorted(int(x.parts[-1].split("=")[1]) for x in d.glob("testid=*")
                       if x.parts[-1].split("=")[1].isdigit())
-        if tids:
-            cands.append((d / f"testid={tids[-1]}", kind, tids[-1]))
-    if source in ("live", "official"):
-        cands = [c for c in cands if c[1] == source]
+        if not tids:
+            continue
+        avail += tids
+        pick = testid if testid is not None else tids[-1]
+        if pick not in tids:
+            continue
+        cands.append((d / f"testid={pick}", kind, pick))
+    if testid is not None and not cands:
+        return {"error": f"该通道没有 testid={testid}（可选：{sorted(set(avail))}）"}
     if not cands:
         return {}
     # live（进行中的新数据）优先；否则正式
     dd = next((c[0] for c in cands if c[1] == "live"), cands[0][0])
     kind = next((c[1] for c in cands if c[0] == dd))
+    tid = next((c[2] for c in cands if c[0] == dd))
+
+    # ★ 2026-10-06：**"是不是还在跑"改从桶里的 progress.json 读**，不再靠"数据在哪个目录"。
+    #   水桶模型下只有一个位置，靠目录已经分不出进行中/已结束了 ——
+    #   而下游要靠它决定"要不要剔除被截断的末圈"（判错就会出现
+    #   "最新比容量骤降"的假象，实测踩过）。老数据集没有这个标记，退回按目录判断。
+    _prog = dd / "progress.json"
+    if _prog.exists():
+        try:
+            _pj = json.loads(_prog.read_text(encoding="utf-8-sig"))
+            if "finished" in _pj:
+                kind = "official" if _pj["finished"] else "live"
+        except (OSError, ValueError):
+            pass
+
     detail = F.load_detail(dd / "detail.csv")
     cs = F.cycles_of_detail(detail, mass_g)
+
+    # ★ 最新那个测试可能**才刚起、一圈都没跑完**。以前这里取了 tids[-1] 就往下走，
+    #   于是出一份全空的报告（图上没有点、表里没有数，却看着像"报告出来了"）。
+    #   实测 2026-10-04：10-1 换了新测试 282（0 圈），报告全空。
+    #   现在**明说"没有可报告的圈"**，并把可选的测试号列出来 —— 宁可报错，不交空报告。
+    if not cs:
+        have = sorted(int(x.parts[-1].split("=")[1]) for x in dd.parent.glob("testid=*")
+                      if x.parts[-1].split("=")[1].isdigit())
+        return {"error": f"测试 {tid} 还没有跑完任何一圈（0 圈），出不了报告。"
+                         f"要么等它跑出圈来，要么显式指定另一个测试"
+                         f"（该通道有：{have}）"}
+
     cur1 = F.vq_curves(detail, cycle=1)
 
     # ---- 有效圈（有放电容量的圈）----
@@ -78,8 +118,11 @@ def load_cell(data_dir: Path, channel: str, mass_mg: float,
     effective = [c["cycle"] for c in trend]
 
     # ---- 衰减速率：放电比容量 vs 圈号的最小二乘斜率（每百圈）----
-    # ★ 明细层一个 cycleid 里可能塞了两对充放（合并口径），某圈容量会突然翻倍 ——
-    #   这时线性拟合会给出 +12523 这种荒唐速率（实测）。有跳变就**不给速率**。
+    # 跳变兜底：某圈容量突然涨三成以上就不给速率。
+    # 以前这是**主力**规避 —— 明细层一个 cycleid 里塞两对充放时，按 cycleid 累加
+    # 会让某圈容量凭空翻倍，线性拟合就给出 +12523 这种荒唐速率（实测）。
+    # 那个根因 2026-10-04 已在 `figures.cycles_of_detail` 修掉（圈号按工步序列重算），
+    # 但这条兜底留着：真出现容量跳变（活化、重新装夹、换工步）时同样不该给速率。
     jump = None
     for p, q in zip(trend, trend[1:]):
         if p.get("dis") and q.get("dis") and q["dis"] > p["dis"] * 1.3:
@@ -285,25 +328,37 @@ def platform_share_of_cycle(dd: Path, cycle_no: int, threshold_v: float) -> floa
     detail_path = dd / "detail.csv"
     if not detail_path.exists():
         return None
+    with detail_path.open(encoding="utf-8-sig", newline="") as f:
+        rows = list(csv.DictReader(f))
+    # ★ 圈号按工步序列重算，**不按 cycleid**（一个 cycleid 里可能塞两对充放，
+    #   按它筛会把两圈的放电行一起算进来 → 份额算到另一圈的数据上）。
+    idx = F.cycle_index_of(rows)
+    if idx is None:                     # 切不出合格块 → 退回 cycleid 口径
+        idx = []
+        for r in rows:
+            try:
+                idx.append(int(r.get("cycleid")) + 1)
+            except (TypeError, ValueError):
+                idx.append(-1)
+
     total = below = 0.0
     prev: dict[str, float] = {}
-    with detail_path.open(encoding="utf-8-sig", newline="") as f:
-        for r in csv.DictReader(f):
-            if r.get("cycleid") != str(cycle_no - 1) or r.get("steptype") not in ("dc", "dv"):
-                continue
-            try:
-                cap = float(r.get("cap") or 0)
-                volt = float(r.get("volt") or 0)
-            except ValueError:
-                continue
-            sid = r.get("stepid") or ""
-            inc = cap - prev.get(sid, 0.0)
-            prev[sid] = cap
-            if inc <= 0:
-                continue
-            total += inc
-            if volt < threshold_v:
-                below += inc
+    for r, cyc in zip(rows, idx):
+        if cyc != cycle_no or r.get("steptype") not in ("dc", "dv"):
+            continue
+        try:
+            cap = float(r.get("cap") or 0)
+            volt = float(r.get("volt") or 0)
+        except ValueError:
+            continue
+        sid = r.get("stepid") or ""
+        inc = cap - prev.get(sid, 0.0)
+        prev[sid] = cap
+        if inc <= 0:
+            continue
+        total += inc
+        if volt < threshold_v:
+            below += inc
     return round(below / total, 4) if total > 0 else None
 
 

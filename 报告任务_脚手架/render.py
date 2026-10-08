@@ -335,8 +335,14 @@ def main():
     labels = [v.get("control_short", ""), v.get("experimental_short", "")]
     html = render(ctx, labels)
     # 两套报告不互相覆盖：进行中 → SOH分析报告.html；正式数据集 → 加后缀
-    name = ("SOH分析报告-正式数据集.html" if ctx.get("data_source") == "official"
-            else "SOH分析报告.html")
+    # 产物名带上"本次选择"，一眼可辨是哪两颗的报告（不靠目录区分）
+    sel = ctx.get("selection") or {}
+    tag = ("_%s_vs_%s" % (sel.get("short_a"), sel.get("short_b"))
+           if sel.get("short_a") and sel.get("short_b") else "")
+    if ctx.get("data_source") == "official":
+        name = f"SOH分析报告{tag}-正式数据集.html"
+    else:
+        name = f"SOH分析报告{tag}.html"
     dst = HERE / name
     # ★ 原子替换：Agent 以 root 写过的报告文件，admin 直接 write_text 会 PermissionError；
     #   改名/删除看的是目录写权限（目录是我们自己的），所以走 tmp + os.replace 一定成功。

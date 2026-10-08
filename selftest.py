@@ -476,10 +476,44 @@ def test_soh(c: Checker) -> None:
 
     # 安全阀：切出来的块如果有充无放（或有放无充），整体放弃 → 退回按 cycleid 分组。
     # 宁可少切，也不能切错。
-    from probe import group_cycles
-    c.ok(group_cycles([r("1", "4", "dc", "0.1"), r("1", "2", "cc", "0.1"),
-                       r("2", "4", "dc", "0.1"), r("2", "2", "cc", "0.1")]) is None,
-         "切出「只有放电没有充电」的块时，返回 None（调用方会退回 cycleid 分组）")
+    from probe import assign_cycle_index, group_cycles
+
+    # ★ 领头方向必须自动识别：先放后充（本项目的 Na‖HC 半电池）和先充后放
+    #   （正极/全电池）都要吃得下。套错方向不会报错，只会**静默失效**
+    #   —— 切出来的块全不合格 → 退回 cycleid → 修正等于没做（2026-10-04 踩到）。
+    half = [r("1", "1", "dc", "0.1"), r("1", "2", "cc", "0.1"),
+            r("2", "1", "dc", "0.1"), r("2", "2", "cc", "0.1")]
+    c.eq(len(group_cycles(half) or []), 2,
+         "★ 先放后充（Na‖HC）：dc→cc 切成 2 圈")
+    full = [r("1", "1", "cc", "0.1"), r("1", "2", "dc", "0.1"),
+            r("2", "1", "cc", "0.1"), r("2", "2", "dc", "0.1")]
+    c.eq(len(group_cycles(full) or []), 2,
+         "★ 先充后放（正极/全电池）：cc→dc 同样切成 2 圈（老口径回归）")
+
+    # ★ 一个 cycleid 里塞两对充放（实测 10-1 的 cycleid=2 就是 stepid 2/4 与 7/9）——
+    #   按 cycleid 只能得到 1 圈、容量还会翻倍；按工步序列重算必须看出 2 圈。
+    two_pairs = [r("2", "2", "dc", "0.1"), r("2", "4", "cc", "0.1"),
+                 r("2", "7", "dc", "0.1"), r("2", "9", "cc", "0.1")]
+    c.eq(len(set(assign_cycle_index(two_pairs))), 2,
+         "★ 一个 cycleid 里两对充放 → 重算出 2 圈")
+    c.eq(len(group_cycles(two_pairs) or []), 2, "同上，分块也是 2 块")
+
+    # 搁置工步对切圈**透明**：既不换圈也不置位
+    with_rest = [r("1", "1", "rest", "0"), r("1", "2", "dc", "0.1"),
+                 r("1", "3", "rest", "0"), r("1", "4", "cc", "0.1"),
+                 r("2", "1", "rest", "0"), r("2", "2", "dc", "0.1"),
+                 r("2", "3", "cc", "0.1")]
+    c.eq(len(group_cycles(with_rest) or []), 2, "★ rest 工步对切圈透明（不换圈）")
+
+    # 进行中的数据：末圈只有放电（放完了还没充）是**真实的不完整圈**，要保留。
+    # 一味放弃会让进行中的整份数据退回 cycleid 口径 —— 修正等于没做。
+    c.eq(len(group_cycles(half + [r("3", "1", "dc", "0.1")]) or []), 3,
+         "★ 末圈只有放电（进行中）→ 保留，不整份退回 cycleid")
+
+    # 但整份数据只有一块且缺一半（典型：全是放电行）说明规则根本没生效
+    # → 仍返回 None，退回 cycleid 分组（至少还能给出逐圈序列）。
+    c.ok(group_cycles([r("1", "1", "dc", "0.1"), r("2", "1", "dc", "0.1")]) is None,
+         "全是放电行（规则没生效）→ 返回 None，退回 cycleid 分组")
     c.ok(group_cycles([]) == [] or group_cycles([]) is None,
          "空输入不炸")
 

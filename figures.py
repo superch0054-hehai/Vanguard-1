@@ -29,7 +29,8 @@ from pathlib import Path
 from xml.sax.saxutils import escape as _xml_esc
 
 from probe import (CAP_TO_MAH, CE_CHARGE_OVER_DISCHARGE, CHARGING_STEPTYPES,
-                   DISCHARGING_STEPTYPES, _steptype, ce_pct, group_cycles)
+                   DISCHARGING_STEPTYPES, _steptype, ce_pct, cycle_index_of,
+                   group_cycles)
 
 VERSION = "1.0"
 
@@ -749,13 +750,32 @@ def chart_rate(title: str, cells: list[dict],
 
 def _detail_cycle_rows(detail_rows: list[dict], cycle: int,
                        exact: bool = False) -> list[dict]:
-    """取「第 cycle 圈」的明细行。cycle 用**人话口径**（第 1 圈起），
-    对应明细层 cycleid = cycle - 1（AGENTS.md：detail.cycleid 比 steps 的小 1）。
-    若该圈没有任何行，回退到明细里出现的最小 cycleid（保证首圈永远画得出来）。
+    """取「第 cycle 圈」的明细行。cycle 用**人话口径**（第 1 圈起）。
+
+    圈号**按工步序列重算**（`probe.cycle_index_of`），不直接用明细的 `cycleid`：
+    实测一个 `cycleid` 里可能塞了两对充放（stepid 2/4 与 7/9），照 `cycleid` 取
+    会把两圈并成一条曲线（`report_pack` 里"某圈容量突然翻倍"就是这个）。
+
+    重算不可用时退回"明细 `cycleid` = cycle - 1"（单段循环的方案下两者一致，
+    见 AGENTS.md：明细层 cycleid 比工步层小 1）。
+    若该圈没有任何行，回退到明细里出现的最小圈号（保证首圈永远画得出来）。
 
     exact=True 时**不回退**：多圈叠加的图必须"没有就是没有"，
     否则请求的第 50 圈会拿第 1 圈的数据顶上 —— 图上多出一条看不出错的假曲线。
     """
+    idx = cycle_index_of(detail_rows)
+    if idx is not None:
+        available = sorted(set(idx))
+        if not available:
+            return []
+        target = cycle
+        if target not in available:
+            if exact:
+                return []
+            target = available[0]
+        return [r for r, i in zip(detail_rows, idx) if i == target]
+
+    # ---- 退路：重算切不出合格块（某块切错了）→ 老老实实按 cycleid 分组 ----
     def cid_of(r):
         try:
             return int(r.get("cycleid"))
@@ -1011,38 +1031,51 @@ def cycles_of_detail(detail_rows: list[dict],
     工步容量 = 该工步**末条** cap（时间序最后一条）—— 对明细行求和会把同一份
     容量重复计几十遍（AGENTS.md 记过的坑）。energy 同理。
 
-    圈号 = 明细 cycleid + 1（人话口径）。明细层没有内阻列 → dcir 恒为 None；
-    另带每圈平均放电电流 "ma"（**mA**，倍率标签用）。
+    ★ 圈号**按工步序列重算**（`probe.cycle_index_of`），**不按明细 cycleid 累加**：
+    实测一个 cycleid 里可能塞了两对充放（stepid 2/4 与 7/9），按 cycleid 累加
+    会把两圈的容量并成一份 —— 某圈容量凭空翻倍（实测在衰减拟合上给出 +12523
+    这种荒唐速率；`report_pack` 里那条"有跳变就不给速率"的规避就是为它写的）。
+    重算不可用时退回"人话圈号 = 明细 cycleid + 1"（单段循环方案下两者一致）。
+
+    明细层没有内阻列 → dcir 恒为 None；另带每圈平均放电电流 "ma"（**mA**）。
     """
+    idx = cycle_index_of(detail_rows)
+
     step_end: dict[tuple, dict] = {}
     curr_by_cycle: dict[int, list[float]] = {}
-    for r in detail_rows:
+    for n, r in enumerate(detail_rows):
         st = _steptype(r)
-        try:
-            cid = int(r.get("cycleid"))
-        except (TypeError, ValueError):
-            continue
-        key = (cid, r.get("stepid"))
+        if idx is not None:
+            cyc = idx[n]
+        else:
+            try:
+                cyc = int(r.get("cycleid")) + 1     # 退路：人话圈号 = cycleid + 1
+            except (TypeError, ValueError):
+                continue
         try:
             cap = float(r.get("cap") or 0)
             eng = float(r.get("eng") or 0)
         except ValueError:
             cap = eng = 0.0
-        # 文件本就按时间序排列，直接覆盖 = 留下末条
-        step_end[key] = {"st": st, "cap": cap, "eng": eng}
+        # 文件本就按时间序排列，直接覆盖 = 留下末条。
+        # 键用**重算后的圈号**而不是 cycleid：两个物理圈共用一个 cycleid 时，
+        # 按 cycleid 做键会让后一圈的末条盖掉前一圈的（那一圈容量就少算了）。
+        step_end[(cyc, r.get("stepid"))] = {"cyc": cyc, "st": st,
+                                            "cap": cap, "eng": eng}
         if st in DISCHARGING_STEPTYPES:
             try:
-                curr_by_cycle.setdefault(cid, []).append(abs(float(r.get("curr") or 0)))
+                curr_by_cycle.setdefault(cyc, []).append(abs(float(r.get("curr") or 0)))
             except ValueError:
                 pass
 
     per_cycle: dict[int, dict] = {}
-    for (cid, _sid), e in step_end.items():
+    for e in step_end.values():
+        cyc = e["cyc"]
         chg = e["st"] in CHARGING_STEPTYPES
         dis = e["st"] in DISCHARGING_STEPTYPES
         if not chg and not dis:
             continue                    # rest 等工步不参与容量累计
-        pc = per_cycle.setdefault(cid, {"chg": 0.0, "dis": 0.0,
+        pc = per_cycle.setdefault(cyc, {"chg": 0.0, "dis": 0.0,
                                         "chg_eng": 0.0, "dis_eng": 0.0})
         if chg:
             pc["chg"] += e["cap"]
@@ -1053,15 +1086,15 @@ def cycles_of_detail(detail_rows: list[dict],
 
     out: list[dict] = []
     first_dis = None
-    for cid in sorted(per_cycle):
-        pc = per_cycle[cid]
+    for cyc in sorted(per_cycle):
+        pc = per_cycle[cyc]
         c = pc["chg"] * CAP_TO_MAH
         d = pc["dis"] * CAP_TO_MAH
         if first_dis is None:
             first_dis = d
-        ma = (sum(curr_by_cycle.get(cid, [])) / len(curr_by_cycle[cid]) * 1000.0
-              if curr_by_cycle.get(cid) else 0.0)
-        rec = dict(cycle=cid + 1, chg=c, dis=d,
+        ma = (sum(curr_by_cycle.get(cyc, [])) / len(curr_by_cycle[cyc]) * 1000.0
+              if curr_by_cycle.get(cyc) else 0.0)
+        rec = dict(cycle=cyc, chg=c, dis=d,
                    ce=ce_pct(c, d),
                    ee=(pc["dis_eng"] / pc["chg_eng"] * 100) if pc["chg_eng"] else None,
                    retention=(d / first_dis * 100) if first_dis else None,
@@ -1272,7 +1305,7 @@ def main() -> int:
                 # 每样品一张、多圈叠加：圈列表 = 请求 ∩ 已完成；不足 2 圈退回到已有圈
                 want = [int(x) for x in str(args.dqdv_cycles).split(",") if x.strip()]
                 done = [c["cycle"] for c in cs if (c.get("dis") or 0) > 0] or \
-                       sorted({int(r.get("cycleid") or 0) + 1 for r in detail})
+                       sorted(set(cycle_index_of(detail) or []))
                 drawn, missing = pick_dqdv_cycles(want, done)
                 cell["dqdv_multi"] = dqdv_per_cycle(detail, drawn)
                 cell["dqdv_cycles_drawn"] = sorted(cell["dqdv_multi"])

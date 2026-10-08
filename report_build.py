@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 from datetime import datetime
@@ -34,6 +35,19 @@ VERSION = "1.1"
 HERE = Path(__file__).resolve().parent
 # 静态脚手架（与通道无关，每次组装原样复制）：提示词/模板/render.py/任务说明
 SCAFFOLD = HERE / "报告任务_脚手架"
+
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    """原子写：先写 .tmp 再 os.replace。
+
+    ★ 为什么必须这样：Agent（容器内 root）在任务包里写过文件后，admin 直接
+    `write_text` 覆盖同名文件会 PermissionError（实测把重建打断在 global_context.json 上，
+    而它先 rmtree 后重建 → 任务包留在半成品状态）。改名只看**目录**写权限，目录是我们的。
+    """
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def normalize_channel(entry: str) -> str:
@@ -50,6 +64,9 @@ def main() -> int:
     p.add_argument("--ch-b", required=True, help="通道 B（如 10-2）")
     p.add_argument("--label-a", default=None, help="样品 A 的图例名（默认通道号）")
     p.add_argument("--label-b", default=None, help="样品 B 的图例名（默认通道号）")
+    p.add_argument("--testid-a", type=int, default=None,
+                   help="指定通道 A 用哪一个测试（默认取最新的那个 = 当前在跑的）")
+    p.add_argument("--testid-b", type=int, default=None, help="同上，通道 B")
     p.add_argument("--data-dir", default="./data")
     p.add_argument("--source", choices=["auto", "live", "official"], default="auto",
                    help="数据来源：auto=live 优先；live=只用进行中的每日增量；"
@@ -67,9 +84,10 @@ def main() -> int:
                    help="重建时保留任务包里 Agent 已写的 段落/（默认开）")
     p.add_argument("--no-keep-paragraphs", dest="keep_paragraphs", action="store_false",
                    help="丢弃已有 段落/（只在确认要全部重写时用）")
-    p.add_argument("--compose", choices=["off", "missing", "all"], default="off",
+    p.add_argument("--compose", choices=["off", "missing", "refresh", "all"], default="off",
                    help="填空式正文合成（5-D 主路径）：off=不由程序填（让 Agent 写）；"
-                        "missing=只补空缺；all=全部用合成稿覆盖。**秒级出全篇**")
+                        "missing=只补空缺；refresh=重填非 AI 段（换通道/数据更新后用）；"
+                        "all=全部重填（AI 段受台账保护）。**秒级出全篇**")
     p.add_argument("--paragraphs-from", default=None,
                    help="段落种子目录：把里面的 *.txt 拷进新任务包的 段落/"
                         "（用于从备份恢复；任务包自己的 段落/ 优先）")
@@ -92,14 +110,15 @@ def main() -> int:
     dqdv_cycles = [int(x) for x in str(args.dqdv_cycles).split(",") if x.strip()]
     cells: dict[str, dict] = {}
     labels: dict[str, str] = {}
-    for entry, label in ((args.ch_a, args.label_a or args.ch_a),
-                         (args.ch_b, args.label_b or args.ch_b)):
+    for entry, label, want_tid in ((args.ch_a, args.label_a or args.ch_a, args.testid_a),
+                                   (args.ch_b, args.label_b or args.ch_b, args.testid_b)):
         key = normalize_channel(entry)
         cell = RP.load_cell(data_dir, key, mass_parts[len(cells)], dqdv_cycles,
-                            args.source)
-        if not cell:
-            print(f"  ❌ 通道 {entry}：找不到数据目录。"
-                  "该通道得有测试数据（live 或正式），才能进对比报告。", file=sys.stderr)
+                            args.source, testid=want_tid)
+        if not cell or cell.get("error"):
+            why = (cell.get("error")
+                   if cell else "找不到数据目录。该通道得有测试数据（live 或正式）")
+            print(f"  ❌ 通道 {entry}：{why}", file=sys.stderr)
             continue
         cells[key] = cell
         labels[key] = label
@@ -115,6 +134,14 @@ def main() -> int:
     # ---- 2. 数据契约 ----
     generated = datetime.now().strftime("%Y-%m-%d %H:%M")
     ctx = RP.build_global_context(labels, cells, mass_parts[0], generated)
+    # 产物名要能一眼看出"这是哪两颗的"（身份放文件名，不放目录 —— 见 AGENTS.md 七之四）
+    _keys = list(cells)
+    ctx["selection"] = {
+        "ch_a": _keys[0], "ch_b": _keys[1],
+        "short_a": "-".join(_keys[0].split("-")[-2:]),
+        "short_b": "-".join(_keys[1].split("-")[-2:]),
+        "label_a": labels[_keys[0]], "label_b": labels[_keys[1]],
+    }
     cutoff = max((c.get("progress_updated") or "" for c in cells.values()))
     ctx["data_cutoff"] = cutoff or generated
     # ---- 数据来源标注（两套报告都出：必须让读者一眼看出这份是哪套）----
@@ -196,6 +223,12 @@ def main() -> int:
         print(f"  🖼  {name}.svg")
 
     # ---- 4. 组装任务包（整目录替换；但 Agent 已写的段落默认保住）----
+    # ★ 先校验输入再删包：原来顺序反了 —— rmtree 之后才发现脚手架不存在，
+    #   于是"删了旧的、建不出新的"，任务包留在半成品（2026-10-04 实测踩到）。
+    scaffold = Path(args.scaffold_dir)
+    if not scaffold.is_dir():
+        print(f"❌ 脚手架目录不存在：{scaffold}（**未动**已有任务包）", file=sys.stderr)
+        return 1
     keep: dict[str, str] = {}
     seed = Path(args.paragraphs_from) if args.paragraphs_from else None
     if seed and seed.is_dir():
@@ -214,10 +247,6 @@ def main() -> int:
     if out.exists():
         shutil.rmtree(out)
     out.mkdir(parents=True)
-    scaffold = Path(args.scaffold_dir)
-    if not scaffold.is_dir():
-        print(f"❌ 脚手架目录不存在：{scaffold}", file=sys.stderr)
-        return 1
     for item in scaffold.iterdir():
         if item.is_dir():
             shutil.copytree(item, out / item.name)
@@ -227,10 +256,10 @@ def main() -> int:
     for name, text in keep.items():
         dest = out / "段落" / name
         dest.parent.mkdir(exist_ok=True)
-        dest.write_text(text, encoding="utf-8")
+        _atomic_write(dest, text)
 
-    (out / "global_context.json").write_text(
-        json.dumps(ctx, ensure_ascii=False, indent=1), encoding="utf-8")
+    _atomic_write(out / "global_context.json",
+                  json.dumps(ctx, ensure_ascii=False, indent=1))
     bd = out / "block_data"
     bd.mkdir(exist_ok=True)
     n = 0
@@ -241,17 +270,22 @@ def main() -> int:
                 "S43A", "S43B", "S43C", "S43D",
                 "S51A", "S51B", "S51C", "S52A", "S52B", "S52C", "S52D"):
         d = RP.build_block_data(bid, cells, ctx, labels)
-        (bd / f"{bid}.json").write_text(
-            json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+        _atomic_write(bd / f"{bid}.json", json.dumps(d, ensure_ascii=False, indent=1))
         n += 1
 
     fig_dir = out / "图"
     fig_dir.mkdir(exist_ok=True)
     for fname, fig in figs.items():
-        (fig_dir / f"{fname}.svg").write_text(fig.svg(), encoding="utf-8")
+        _atomic_write(fig_dir / f"{fname}.svg", fig.svg())
 
     # ---- 4b. 填空式正文（可选）：程序把"数据句"直接填好 ----
     if args.compose != "off":
+        # compose_paragraphs.py 在脚手架里（也随包拷进去）；report_build 可能从别处运行
+        # （共享目录的 报告工具/），所以先把这两个目录挂进 sys.path —— 实测漏了这步
+        # 会 ModuleNotFoundError，而且它发生在 rmtree 之后，包会留在半成品。
+        for _cand in (scaffold, out):
+            if _cand.is_dir() and str(_cand) not in sys.path:
+                sys.path.insert(0, str(_cand))
         import compose_paragraphs as CP
         n, skipped = CP.compose(out, args.compose, None)
         print(f"  ✍  合成正文 {n} 段" + (f"（跳过已有 {len(skipped)} 段）" if skipped else "")
@@ -264,7 +298,7 @@ def main() -> int:
         import re
         t = re.sub(r"数据截至 \d{4}-\d{2}-\d{2} \d{2}:\d{2}",
                    f"数据截至 {cutoff or generated}", t)
-        ts.write_text(t, encoding="utf-8")
+        _atomic_write(ts, t)
 
     print(f"\n✅ 任务包已重建：{out}")
     print(f"   通道：{' vs '.join(labels[k] for k in cells)}｜数据截至 {ctx.get('data_cutoff')}")

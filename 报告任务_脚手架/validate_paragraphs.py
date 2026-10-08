@@ -108,6 +108,14 @@ def _structural(text: str) -> set[str]:
 AI_DIGIT_BLOCKS = ("S35", "S41", "S42")
 
 
+# AI 写作的章节（3.6 / 4.1 / 4.2 / 4.3 / 5.2）—— 与 write_ai_sections.AI_BLOCKS 必须一致（有测试钉住）
+AI_BLOCKS = ("S35A", "S35B", "S35C",
+             "S41A", "S41B", "S41C", "S41D",
+             "S42INTRO", "S42A", "S42B", "S42C", "S42D", "S42E",
+             "S43A", "S43B", "S43C", "S43D",
+             "S52A", "S52B", "S52C", "S52D")
+
+
 def _ai_digit_violation(text: str, ctx: dict | None = None,
                         data: dict | None = None) -> list[str]:
     """返回 AI 段里"不该出现的数字"（去掉白名单后剩下的）。
@@ -272,12 +280,7 @@ def main() -> int:
         print(f"❌ 不是任务包目录（缺 段落/ 或 block_data/）：{pkg}", file=sys.stderr)
         return 1
 
-    # 出处台账（split_batch.py 落的）：AI 段适用"不许写数值"的规则
-    try:
-        _led = json.loads((para_dir / "_来源.json").read_text(encoding="utf-8-sig"))
-        ai_blocks = {k for k, v in _led.items() if str(v).upper().startswith("AI")}
-    except (OSError, ValueError):
-        ai_blocks = set()
+    ai_blocks = AI_BLOCKS          # AI 写的章节是**固定清单**（见 AI_BLOCKS），不需要台账
 
     failed, warned, ok = {}, {}, 0
     for p in sorted(para_dir.glob("*.txt")):

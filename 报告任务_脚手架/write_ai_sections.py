@@ -33,11 +33,14 @@ MODEL_BASE = os.environ.get("MODEL_BASE", "http://10.201.9.180:12345/v1")
 MODEL = os.environ.get("MODEL_NAME", "Qwen3.8-27B-AWQ-INT4")
 
 # 要 AI 写的章节（判断类）：3.6 横向对比 / 4.1 核心结论 / 4.2 机制 / 4.3 建议 / 5.2 展望
-AI_BLOCKS = ["S35A", "S35B", "S35C",
-             "S41A", "S41B", "S41C", "S41D",
-             "S42INTRO", "S42A", "S42B", "S42C", "S42D", "S42E",
-             "S43A", "S43B", "S43C", "S43D",
-             "S52A", "S52B", "S52C", "S52D"]
+# ★ 清单只有一处出处：validate_paragraphs.AI_BLOCKS（那边还负责"AI 段不许写测试数值"的判定）
+sys.path.insert(0, str(HERE))
+try:
+    from validate_paragraphs import AI_BLOCKS
+except Exception:                      # 兜底：极端情况下不因为导入失败而罢工
+    AI_BLOCKS = ["S35A", "S35B", "S35C", "S41A", "S41B", "S41C", "S41D",
+                 "S42INTRO", "S42A", "S42B", "S42C", "S42D", "S42E",
+                 "S43A", "S43B", "S43C", "S43D", "S52A", "S52B", "S52C", "S52D"]
 
 NO_NUMBER_RULE = """\
 【最重要的一条】你写的内容里**不许出现任何测试数值** —— 容量、比容量、库伦效率、保持率、
@@ -70,6 +73,11 @@ def build_prompt(pkg: Path, only: list[str] | None = None,
             parts.append(f"- {bid}：" + "；".join(reasons))
     for bid in blocks:
         spec = _read(pkg / "提示词" / f"{bid}.txt")
+        # ★ n=1 硬要求（校验器会拦）：实测有 4~5 段漏写"需复测/波动范围"而被判不合格，
+        #   所以在这一层再点一次名（提示词里原有这条，但模型会漏）。
+        if bid.startswith(("S41", "S42", "S43", "S51", "S52")):
+            spec += (chr(10) + "★ 本段正文里**必须出现**「波动范围」或「复测」或「需验证」或「可能」"
+                     "其中之一（校验器硬性要求，漏了就算不合格）。")
         data = _read(pkg / "block_data" / f"{bid}.json")
         parts.append(f"\n=== 单元 {bid} ===\n【写法要求】\n{spec}\n【可用素材（唯一数值来源）】\n{data[:2600]}")
     parts.append(f"\n【输出】只输出 JSON，包含这 {len(blocks)} 个键："

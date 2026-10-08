@@ -32,18 +32,30 @@ import unicodedata
 from datetime import datetime
 from typing import Any, Sequence
 
-from neware_client import (
-    CHARGING_STEPTYPES,
-    DEVTYPE_NAMES,
-    DISCHARGING_STEPTYPES,
-    STEPTYPE_NAMES,
-    Channel,
-    NewareClient,
-    NewareError,
-    PIPE_CLIENT,
-    build_transport,
-    parse_channel,
-)
+# ★ 设备客户端是**可选依赖**：报告链路（figures/report_pack）只需要下面的纯常量，
+#   而共享目录里**绝不允许出现 neware_client**（它能 start/stop，等于把停测试的能力交给 Agent）。
+#   所以这里改成可选导入：拿不到客户端时，报告照算，只有 probe 的联网体检功能不可用。
+try:                                            # pragma: no cover - 取决于运行位置
+    from neware_client import (
+        CHARGING_STEPTYPES,
+        DEVTYPE_NAMES,
+        DISCHARGING_STEPTYPES,
+        STEPTYPE_NAMES,
+        Channel,
+        NewareClient,
+        NewareError,
+        PIPE_CLIENT,
+        build_transport,
+        parse_channel,
+    )
+    DEVICE_AVAILABLE = True
+except ImportError:                             # 只装了报告那套脚本时走这里
+    CHARGING_STEPTYPES = {"cc", "cv", "cccv", "pcccv", "cp", "cr", "pulse"}
+    DISCHARGING_STEPTYPES = {"dc", "dv", "cccd", "dp", "dr"}
+    DEVTYPE_NAMES, STEPTYPE_NAMES = {}, {}
+    Channel = NewareClient = NewareError = PIPE_CLIENT = None
+    build_transport = parse_channel = None
+    DEVICE_AVAILABLE = False
 
 PASS, FAIL, WARN, SKIP = "PASS", "FAIL", "WARN", "SKIP"
 
@@ -295,8 +307,67 @@ def _steptype(row: dict[str, Any]) -> str:
     return (row.get("steptype") or "").strip().lower()
 
 
-def group_cycles(rows: list[dict[str, Any]]) -> list[list[dict[str, Any]]] | None:
-    """把工步层切成「一圈一块」—— 一圈 = 一个充电阶段 + 一个放电阶段。
+def _first_direction(rows: list[dict[str, Any]]) -> str:
+    """第一个非搁置工步的方向 —— 决定「一圈从哪一步开始」。
+
+    ★ 这里**不能假定先充后放**，两边都真实存在：
+
+    * 正极 / 全电池：先充后放（cc→dc），一圈起于**充电**；
+    * 本项目的负极半电池 **Na‖HC：先放后充（dc→cc）**，一圈起于**放电**。
+
+    套错方向的后果不是报错，而是**静默失效**：领头方向取反后，切出来的每一块
+    都"有放无充"（或反之），校验判定不合格 → 调用方退回按 `cycleid` 分组
+    → 全部修正白白丢掉，而**从结果上看不出来**（只是数字还是旧的）。
+    （2026-10-04 踩到：`group_cycles` 原本写死"见过放电再来充电就换圈"，
+    那是充电优先口径，对我们这颗先放后充的半电池永远返回 None。）
+    """
+    for row in rows:
+        st = _steptype(row)
+        if st in CHARGING_STEPTYPES:
+            return "chg"
+        if st in DISCHARGING_STEPTYPES:
+            return "dchg"
+    return "chg"                      # 全是搁置（或空）→ 无从判断，按传统口径
+
+
+def assign_cycle_index(rows: list[dict[str, Any]],
+                       lead: str | None = None) -> list[int]:
+    """逐行给出「人话圈号」（从 1 起、顺序号）—— 与 `group_cycles` 同一套规则。
+
+    规则（与 NewareNDA 的 `cycle_mode` 同源）：**新的一圈起于"领头方向"的工步，
+    且此后已经出现过反方向的工步**。领头方向见 `_first_direction`。
+
+    搁置（rest）等既非充也非放的工步对切圈**透明** —— 既不换圈也不置位。
+    （NewareNDA 靠 `status.split('_')` 抛异常兜住的 SIM / REST 是同一回事。）
+
+    与 `group_cycles` 的分工：本函数**只编号、不校验**，供明细层这种
+    "需要逐行落圈号"的场合用（明细动辄几万行，返回块列表再反查很别扭）。
+    需要"切不出来就明说"的场合用 `cycle_index_of`。
+    """
+    if lead is None:
+        lead = _first_direction(rows)
+    if lead == "dchg":
+        lead_types, other_types = DISCHARGING_STEPTYPES, CHARGING_STEPTYPES
+    else:
+        lead_types, other_types = CHARGING_STEPTYPES, DISCHARGING_STEPTYPES
+
+    out: list[int] = []
+    cyc = 1
+    seen_other = False
+    for row in rows:
+        st = _steptype(row)
+        if seen_other and st in lead_types:
+            cyc += 1
+            seen_other = False
+        out.append(cyc)
+        if st in other_types:
+            seen_other = True
+    return out
+
+
+def group_cycles(rows: list[dict[str, Any]],
+                 lead: str | None = None) -> list[list[dict[str, Any]]] | None:
+    """把工步层切成「一圈一块」—— 一圈 = 一个放电阶段 + 一个充电阶段。
 
     **为什么不直接用 `cycleid`**：实测发现测试方案里有**多段「循环」工步**时
     （例如"化成 3 圈 + 老化 5000 圈"），设备的 `cycleid` 只在**程序回到「循环」工步**
@@ -306,31 +377,51 @@ def group_cycles(rows: list[dict[str, Any]]) -> list[list[dict[str, Any]]] | Non
     实测：602 个物理循环被数成 601 个，575 个被数成 575→576 少 1
     （已用 BTSDA 官方导出对照确认：BTSDA 报 602，并按工步序列正确分组）。
 
-    **这里用的规则**：一圈里只该有一个"充电阶段"。
-    所以同一组里，如果**已经出现过放电、又来了充电类工步**，就是新一圈的开始。
+    **切圈规则**见 `assign_cycle_index`（领头方向自动识别，先充/先放都吃得下）。
 
-    返回 None 表示切出来的块不合格（某块有充无放或有放无充），
-    调用方应退回按 `cycleid` 分组 —— **宁可少切，也不能切错**。
+    返回 None 表示切出来的块不合格，调用方应退回按 `cycleid` 分组
+    —— **宁可少切，也不能切错**。唯一的例外是**末圈**：见下。
+
+    末圈可以只有一半（进行中的测试常常停在"放完了、还没充"）。那不是切错，
+    是真实的不完整圈 —— `ce_pct` 已按容量为 0 返回 None 兜住。若连它也判定
+    不合格，进行中的数据会整份退回 `cycleid` 口径，修正等于没做。
+
+    但**只有切出过边界（≥2 块）时**才认这个末圈。整份数据只有一块、且缺一半
+    （典型：全是放电行）说明规则根本没生效，那种退化输入仍要退回 `cycleid`
+    —— 按 `cycleid` 分组至少还能给出逐圈序列。
     """
-    blocks: list[list[dict[str, Any]]] = []
-    cur: list[dict[str, Any]] = []
-    seen_discharge = False
-    for row in rows:
-        st = _steptype(row)
-        if cur and seen_discharge and st in CHARGING_STEPTYPES:
-            blocks.append(cur)
-            cur, seen_discharge = [], False
-        cur.append(row)
-        if st in DISCHARGING_STEPTYPES:
-            seen_discharge = True
-    if cur:
-        blocks.append(cur)
+    if not rows:
+        return []
+    idx = assign_cycle_index(rows, lead)
+    blocks: list[list[dict[str, Any]]] = [[] for _ in range(idx[-1])]
+    for row, i in zip(rows, idx):
+        blocks[i - 1].append(row)
 
-    for b in blocks:
+    for n, b in enumerate(blocks):
         types = {_steptype(r) for r in b}
-        if not (types & CHARGING_STEPTYPES) or not (types & DISCHARGING_STEPTYPES):
-            return None
+        has_chg = bool(types & CHARGING_STEPTYPES)
+        has_dis = bool(types & DISCHARGING_STEPTYPES)
+        if has_chg and has_dis:
+            continue
+        if n == len(blocks) - 1 and len(blocks) >= 2 and (has_chg or has_dis):
+            continue                  # 末圈缺一半：进行中，放行
+        return None
     return blocks
+
+
+def cycle_index_of(rows: list[dict[str, Any]],
+                   lead: str | None = None) -> list[int] | None:
+    """逐行圈号；切不出合格块时返回 None（调用方退回 `cycleid` 口径）。
+
+    校验点在 `group_cycles` 里 —— 只有一处，不会两边规则漂移。
+    """
+    blocks = group_cycles(rows, lead)
+    if blocks is None:
+        return None
+    out: list[int] = []
+    for n, b in enumerate(blocks, 1):
+        out.extend([n] * len(b))
+    return out
 
 
 def _group_by_cycleid(rows: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:

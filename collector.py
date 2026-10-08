@@ -64,11 +64,11 @@ from neware_client import (
 )
 from probe import soh_preview
 
-# ★ 本项目只关心这六颗：10-1/-2/-3 是老化数据，10-6/-7/-8 是控制演示通道。
+# ★ 本项目只关心这七颗：10-1~10-4 是实验数据（1/2 长循环、3/4 倍率），10-6/-7/-8 是控制演示通道。
 # ⚠️ 2026-10-03 踩过：手动跑 `--incremental-now` 没带 `--channels`，旧默认是
 #   「自动发现设备上全部通道」，于是把别人 58 个通道的测试数据全拉进了 data/live/。
-#   现在不填 `--channels` 就只扫下面这六颗 —— 别人的测试一概不碰。
-WATCH_CHANNELS = ("27-188-10-1,27-188-10-2,27-188-10-3,"
+#   现在不填 `--channels` 就只扫下面这七颗 —— 别人的测试一概不碰。
+WATCH_CHANNELS = ("27-188-10-1,27-188-10-2,27-188-10-3,27-188-10-4,"
                   "27-188-10-6,27-188-10-7,27-188-10-8")
 
 VERSION = "1.0"
@@ -176,7 +176,14 @@ class Manifest:
         with open(self.path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
 
-    def load_all(self) -> list[dict[str, Any]]:
+    def load_all(self, dedupe: bool = True) -> list[dict[str, Any]]:
+        """读出索引。
+
+        ★ 2026-10-06：默认**按 key 去重、后来的那一行算数**。
+        为什么：水桶模型下同一轮测试会被记多次（第一次加水时记一笔、
+        结束时再记一笔更新），JSONL 只能追加。不去重的话，
+        "数据集清单"里同一份数据会重复出现好几次。
+        """
         if not self.path.exists():
             return []
         out = []
@@ -187,7 +194,16 @@ class Manifest:
                     out.append(json.loads(line))
                 except json.JSONDecodeError:
                     continue
-        return out
+        if not dedupe:
+            return out
+        latest: dict[str, dict[str, Any]] = {}
+        order: list[str] = []
+        for r in out:
+            k = r.get("key") or f"#{len(order)}"
+            if k not in latest:
+                order.append(k)
+            latest[k] = r          # 后来的覆盖先前的
+        return [latest[k] for k in order]
 
     def collected_keys(self) -> set[str]:
         """已经采过的 (通道|测试号)，用来做幂等。"""
@@ -291,10 +307,12 @@ class Collector:
         count = 0
         for ch, status in finished:
             try:
-                if self.collect(ch, expected_testid=self.running_testid.get(ch.key)):
+                # ★ 水桶模型：结束时**不是**"整采一份到另一个位置"，
+                #   而是把"上一次加水 → 结束"这最后一段补进同一个桶（finish_pass）
+                if self.finish_pass(ch, expected_testid=self.running_testid.get(ch.key)):
                     count += 1
             except NewareError as exc:
-                log(f"通道 {ch.key} 采集失败：{exc}", "ERROR")
+                log(f"通道 {ch.key} 补最后一段失败：{exc}", "ERROR")
 
         # 心跳放在本轮**最后**写 —— 否则里面的"已采数据集数"是上一轮的旧值
         self._write_heartbeat(now)
@@ -333,11 +351,36 @@ class Collector:
         count = 0
         for ch in todo:
             try:
-                if self.collect(ch):
+                # ★ 已经建过桶（我们盯着它跑过）→ 只需补最后一勺，不必整份重拉；
+                #   完全没见过的已结束测试 → 只能整份拉一次。
+                tid = self._current_testid(ch)
+                if tid and self._count_rows(self.bucket_dir(ch, tid) / "detail.csv") > 0:
+                    if self.finish_pass(ch):
+                        count += 1
+                elif self.collect(ch):
                     count += 1
             except NewareError as exc:
                 log(f"  通道 {ch.key} 补采失败：{exc}", "ERROR")
         return count
+
+    def _current_testid(self, ch: Channel) -> str:
+        """问设备：这个通道上现在是哪个测试号。拿不到就返回空。"""
+        assert self.client is not None
+        checks = NewareClient.parse_inquiredf(self.client.inquiredf([ch], 0))
+        return str(checks[0].get("testid") or "") if checks else ""
+
+    def _barcode_of(self, ch: Channel) -> str:
+        """问设备：这个通道的条码（样品身份挂在这儿）。
+
+        拿不到就返回空串 —— 条码本来就是可空的（这批测试一直是空的），
+        但**不能因为拿不到就整个记录失败**：那会把这条测试从索引里弄丢。
+        """
+        assert self.client is not None
+        try:
+            rt = NewareClient.parse_inquire(self.client.inquire([ch], barcode=True))
+            return (rt[0].get("barcode") if rt else "") or ""
+        except (NewareError, Exception):      # noqa: BLE001
+            return ""
 
     def _note_running_testids(self, working: list[Channel]) -> None:
         """测试还在跑的时候，把 (通道 -> 测试号) 记下来。
@@ -361,10 +404,17 @@ class Collector:
 
     # -- 采集 -------------------------------------------------------------
 
-    def collect(self, ch: Channel, expected_testid: str | None = None) -> bool:
-        """采集一个通道刚结束的那个测试。返回是否真的采了。"""
+    def collect(self, ch: Channel, expected_testid: str | None = None,
+                force: bool = False) -> bool:
+        """**整份重拉**一个通道刚结束的测试（覆盖写进同一个桶）。返回是否真的拉了。
+
+        ★ 2026-10-06 起它不再是常态：常态是"天天往桶里加水 + 结束时补最后一勺"。
+        它现在只在两种情况下被调用：
+          ① 兜底：`finish_pass` 补完发现"桶里条数 ≠ 设备条数"（宁缺勿乱，重来一遍）
+          ② 补采：启动时发现某个通道上有个**我们没见过的**已结束测试（`backfill`）
+        """
         assert self.client is not None
-        log(f"开始采集 通道 {ch.key}（状态已结束）")
+        log(f"开始整份采集 通道 {ch.key}（状态已结束）")
 
         # ---- 1. 先抓身份（最时间敏感的一步）----
         # 条码和测试号只在"通道被下一次测试复用之前"有效，所以第一件事就是抓它，
@@ -379,7 +429,7 @@ class Collector:
 
         # ---- 2. 幂等检查（放在等上传之前，免得白等）----
         key = f"{ch.key}|{testid}"
-        if key in self.collected:
+        if key in self.collected and not force:
             log(f"  测试 {testid} 已经采过了（条码 `{barcode or '（空）'}`），跳过")
             return False
 
@@ -447,6 +497,9 @@ class Collector:
         }
         self.manifest.append(record)
         self.collected.add(key)
+        # 桶状态：整份拉完 = 这轮已结束（报告据此决定要不要剔除被截断的末圈）
+        self._write_progress(ddir, testid, len(detail),
+                             int(checks[0].get("uploaded") or 0), finished=True)
         log(f"  已落盘 → {ddir}"
             + (f"  容量保持率 {soh.get('capacity_retention_pct')}%"
                if soh.get("available") else ""))
@@ -481,12 +534,45 @@ class Collector:
                 return False
             time.sleep(interval)
 
-    # -- 每日增量读取（live 区）------------------------------------------
+    # -- 数据桶：一个测试 = 一个目录，天天往里加水 ------------------------
+    #
+    # ★ 2026-10-06 改（用户的"水桶模型"）：以前是**两个位置**——
+    #   天天增量写 `live/`，测试结束时再整采一份到 `channel=/testid=`，
+    #   同一轮测试的数据会存在两处，报告还要选 "live 还是正式"。
+    #   现在合成**一个桶**：
+    #     · 每天 02:00 往里追加一段（incremental_pass）
+    #     · 实验人员在 BTS 上点结束时，把"上一次加水 → 结束"这最后一段也加进去（finish_pass）
+    #     · 加完**核对总条数**；对不上就整份重拉一次（collect）—— 宁可重来，不留半桶
+    #   桶里除数据外还有两样东西：
+    #     · progress.json —— 水位（取到第几条）+ 这轮跑完没有（finished）
+    #     · steps.csv     —— 工步层，每次加水都整份刷新（它很小）
 
-    def live_dir(self, ch: Channel, testid: str) -> Path:
-        """live 区目录。列格式与正式 detail.csv 一致，但**互相独立**：
-        正式数据集仍只在测试结束时采一次，口径与对账结果不受这里影响。"""
-        return self.root / "live" / f"channel={ch.key}" / f"testid={testid}"
+    def bucket_dir(self, ch: Channel, testid: str) -> Path:
+        """这一轮测试的"桶"。数据天天往里加，结束时补齐，始终只有这一份。"""
+        return dataset_dir(self.root, ch, testid)
+
+    @staticmethod
+    def _count_rows(path: Path) -> int:
+        """CSV 的数据行数（不含表头）。文件不在就是 0。"""
+        if not path.exists():
+            return 0
+        with open(path, encoding="utf-8-sig", newline="") as fh:
+            return max(0, sum(1 for _ in fh) - 1)
+
+    def _refresh_steps(self, ch: Channel, testid: str,
+                       ddir: Path) -> list[dict[str, Any]]:
+        """整份刷新桶里的工步层（它很小，覆盖写最省心），**返回工步行**。
+
+        为什么每次加水都刷：报告/自检在**任何时刻**都可能读这个桶，
+        工步层缺了它们就只能等"结束"—— 那就又回到"必须等结束"的老路了。
+        返回值用来算 soh（索引记录里要有它，否则下游 KeyError）。
+        """
+        assert self.client is not None
+        steps = NewareClient.parse_data(
+            self.client.download_steplayer(ch, int(testid) if testid.isdigit() else 0, dcir=1))
+        if steps:
+            write_rows(steps, str(ddir / "steps.csv"))
+        return steps
 
     @staticmethod
     def _read_progress(path: Path) -> dict[str, Any] | None:
@@ -532,6 +618,101 @@ class Collector:
             writer.writerows(flat)
         return len(flat)
 
+    @staticmethod
+    def _write_progress(pdir: Path, testid: str, rows_collected: int,
+                        total_on_device: int, finished: bool) -> None:
+        """落水位 + **"这轮跑完没有"**。
+
+        ★ finished 是水桶模型的关键：它替代了原来靠"数据在哪个目录"
+        （`live/` = 进行中、`channel=/` = 已结束）来判断状态的做法。
+        报告要靠它决定"要不要剔除被截断的末圈"，判错了就会出现
+        "最新比容量骤降"的假象（实测踩过）。
+        """
+        prog = {
+            "testid": testid,
+            "rows_collected": rows_collected,
+            "total_on_device": total_on_device,
+            "finished": bool(finished),
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        (pdir / "progress.json").write_text(
+            json.dumps(prog, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+
+    def _manifest_upsert(self, ch: Channel, testid: str, ddir: Path,
+                         steps: list[dict[str, Any]], barcode: str,
+                         complete: bool) -> None:
+        """在索引（manifest.jsonl）里记一笔 —— **字段与 collect() 的记录完全一致**。
+
+        为什么必须同格式：下游（make_share 的 summary、报告）会读 `soh`、`barcode`
+        这些字段，缺一个就是 KeyError。2026-10-06 第一版就漏了 `soh`，测试当场抓到。
+
+        JSONL 只能追加，所以同一 key 会出现多行；**读的一侧按 key 取最后一行**（= 更新）。
+        """
+        key = f"{ch.key}|{testid}"
+        soh = soh_preview(steps) if steps else {"available": False,
+                                                "reason": "无工步层数据"}
+        self.manifest.append({
+            "key": key, "channel": ch.key, "testid": testid,
+            "devtype": ch.devtype, "devid": ch.devid,
+            "subdevid": ch.subdevid, "chlid": ch.chlid,
+            "devtype_name": DEVTYPE_NAMES.get(ch.devtype, "?"),
+            "barcode": barcode,
+            "collected_at": datetime.now().isoformat(timespec="seconds"),
+            "upload_complete": bool(complete),
+            "step_count": len(steps),
+            "detail_count": self._count_rows(ddir / "detail.csv"),
+            "dir": str(ddir),
+            "parser_version": f"collector {VERSION}",
+            "soh": soh,
+        })
+        self.collected.add(key)
+
+    def finish_pass(self, ch: Channel, expected_testid: str | None = None) -> bool:
+        """通道上的测试**跑完了**：把最后一段水加进桶 → 核对 → 标记完成。
+
+        这就是"水桶的最后一勺"：实验人员在 BTS 上点结束 → 这里把
+        "上一次加水 → 结束"那一段也加进去，桶就满了。
+
+        兜底：加完**核对总条数**；对不上就整份重拉一次（`collect(force=True)`）
+        —— 宁可重来，也不留半桶。原来"结束时整采一份到另一个位置"那条路，
+        现在降级成这里的兜底，不再是常态。
+        """
+        assert self.client is not None
+        log(f"测试结束：通道 {ch.key} —— 补最后一段")
+        checks = NewareClient.parse_inquiredf(self.client.inquiredf([ch], 0))
+        if not checks:
+            log("  inquiredf 没返回，跳过", "WARN")
+            return False
+        testid = str(checks[0].get("testid") or "")
+        if not testid:
+            log("  拿不到测试号，跳过", "WARN")
+            return False
+        if expected_testid and expected_testid != testid:
+            log(f"  ⚠️ 通道已被复用！测试中记录的是 {expected_testid}，"
+                f"现在查到的是 {testid} —— 那一轮的数据可能已经拿不到了", "ERROR")
+
+        # 结束瞬间可能还在传，先等它传完（否则拿到的是偏小的总条数）
+        complete = self._wait_upload_complete(ch, testid)
+        # 把尾巴加进去：和日常增量**同一套水位逻辑**，所以不会重复加
+        self.incremental_pass([ch])
+
+        pdir = self.bucket_dir(ch, testid)
+        got = self._count_rows(pdir / "detail.csv")
+        total = int(checks[0].get("uploaded") or 0)
+        if total > 0 and got >= total:
+            self._write_progress(pdir, testid, got, total, finished=True)
+            self._manifest_upsert(ch, testid,
+                                  pdir, self._refresh_steps(ch, testid, pdir),
+                                  self._barcode_of(ch), complete=complete)
+            log(f"  ✅ 桶已满：测试 {testid} 共 {got} 行（设备 {total}），标记为已结束")
+            return True
+        log(f"  ⚠️ 桶里 {got} 行、设备 {total} 行 —— 对不上，整份重拉一次", "WARN")
+        ok = self.collect(ch, expected_testid=testid, force=True)
+        if ok:
+            self._write_progress(pdir, testid, self._count_rows(pdir / "detail.csv"),
+                                 total, finished=True)
+        return ok
+
     def incremental_pass(self, channels: list[Channel]) -> int:
         """对正在跑测试的通道做一轮增量读取，追加到 live 区。返回新增行数。
 
@@ -553,25 +734,43 @@ class Collector:
                 if not testid or count <= 0:
                     log(f"  [live] {ch.key}：还没有可读的测试数据，跳过")
                     continue
-                if c.get("complete"):
-                    # 传完了 → 正式采集会接住，live 不用再追
-                    log(f"  [live] {ch.key}：测试 {testid} 已传完，等正式采集，跳过")
+                # ★ 2026-10-06：这里原来有一条 `if complete: 跳过，等正式采集接住`。
+                #   水桶模型下它是错的 —— "传完了"恰恰是**最该把最后一段加进去**的时刻。
+                #   现在不跳：结束那一勺由 finish_pass 补，水位保证不会重复加。
+
+                pdir = self.bucket_dir(ch, testid)
+                prog_path = pdir / "progress.json"
+
+                # ★ 没有水位记录、但桶里已经有数据 —— 绝不能假定水位是 0！
+                #   那种桶是"迁移过来的老正式数据集"或"手工拷进来的"，按 0 从头追加
+                #   会把已有的行再来一遍（重复行，且从结果上看不出来）。
+                #   已有行数 == 设备条数 → 只补一条水位记录，一行都不拉；
+                #   对不上 → 交给整份重拉（覆盖写，最安全）。
+                if not prog_path.exists() and self._count_rows(pdir / "detail.csv") > 0:
+                    have = self._count_rows(pdir / "detail.csv")
+                    if have == count:
+                        self._write_progress(pdir, testid, have, count,
+                                             finished=bool(c.get("complete")))
+                        log(f"  [桶] {ch.key}：桶已有 {have} 行、与设备一致 "
+                            "→ 只补水位，不重复拉")
+                    else:
+                        log(f"  [桶] {ch.key}：桶有 {have} 行、设备 {count} 行、且无水位记录 "
+                            "→ 整份重拉（覆盖写）", "WARN")
+                        self.collect(ch, force=True)
                     continue
 
-                pdir = self.live_dir(ch, testid)
-                prog_path = pdir / "progress.json"
                 prog = self._read_progress(prog_path)
                 if prog is None:
                     continue
                 wm = int(prog.get("rows_collected", 0))
                 old_testid = prog.get("testid")
                 if old_testid and old_testid != testid:
-                    # 通道被复用了：水位清零。live 目录按 testid 分开，不会互相覆盖。
-                    log(f"  [live] {ch.key}：测试号变了（{old_testid} → {testid}），"
-                        "另起新文件、水位清零")
+                    # 通道被复用了：换了一个桶（按 testid 分目录），水位从 0 起
+                    log(f"  [桶] {ch.key}：测试号变了（{old_testid} → {testid}），"
+                        "另起一个桶、水位清零")
                     wm = 0
                 if count < wm:
-                    log(f"  [live] {ch.key}：设备端条数 {count} 比水位 {wm} 还小 —— "
+                    log(f"  [桶] {ch.key}：设备端条数 {count} 比水位 {wm} 还小 —— "
                         "数据异常，拒绝拉取（宁缺勿乱）", "ERROR")
                     continue
                 if count == wm:
@@ -586,22 +785,20 @@ class Collector:
                                              startpos=pos, count=n)))
                     pos += n
                 if self.cfg.dry_run:
-                    log(f"  [live] {ch.key}：dry-run，本应新增 {len(rows)} 行")
+                    log(f"  [桶] {ch.key}：dry-run，本应新增 {len(rows)} 行")
                     continue
 
                 pdir.mkdir(parents=True, exist_ok=True)
                 n_added = self._append_rows(rows, pdir / "detail.csv")
                 added_total += n_added
-                prog = {
-                    "testid": testid,
-                    "rows_collected": wm + n_added,
-                    "total_on_device": count,
-                    "updated_at": datetime.now().isoformat(timespec="seconds"),
-                }
-                prog_path.write_text(json.dumps(prog, ensure_ascii=False,
-                                                indent=1) + "\n", encoding="utf-8")
-                log(f"  [live] {ch.key}：测试 {testid} 新增 {n_added} 行"
-                    f"（{wm} → {count}）")
+                steps = self._refresh_steps(ch, testid, pdir)
+                self._write_progress(pdir, testid, wm + n_added, count,
+                                     finished=bool(c.get("complete")))
+                # 桶一出现就要在索引里 —— 否则报告/Agent 看不到这轮测试
+                self._manifest_upsert(ch, testid, pdir, steps, self._barcode_of(ch),
+                                      complete=bool(c.get("complete")))
+                log(f"  [桶] {ch.key}：测试 {testid} 新增 {n_added} 行"
+                    f"（{wm} → {count}）" + ("　已传完" if c.get("complete") else ""))
             except NewareError as exc:
                 log(f"  [live] {ch.key}：增量读取失败（{exc}），下轮重试", "ERROR")
             except Exception as exc:      # noqa: BLE001

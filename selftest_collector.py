@@ -153,10 +153,17 @@ def make_collector(fake: FakeTransport, settle: float = 0.0) -> C.Collector:
 
 
 def test_incremental(c: Checker) -> None:
-    """每日增量读取的离线测试 —— live 区、水位、边界全在这里。"""
+    """每日增量读取的离线测试 —— **水桶**、水位、边界全在这里。"""
     import csv as _csv
+    # ★ 2026-10-06：水桶模型下**只有一个位置**，所以这个测试必须先清干净 ——
+    #   否则前面几节写进同一个桶的数据会污染水位，第 1 轮就变成「没有新增」。
+    #   （以前增量写在独立的 live/ 区，天然隔离；合并之后必须显式清。）
+    bkt = OUT / "channel=27-188-10-2" / f"testid={TESTID}"
+    if bkt.exists():
+        import shutil as _sh
+        _sh.rmtree(bkt)      # 只清这一个桶 —— status.json 等别的东西后面还要用
 
-    def live_csv_rows(p: Path) -> int:
+    def csv_rows(p: Path) -> int:
         if not p.exists():
             return 0
         with p.open(encoding="utf-8-sig", newline="") as fh:
@@ -173,9 +180,9 @@ def test_incremental(c: Checker) -> None:
 
     added = col.incremental_pass(col.channels)
     c.eq(added, 30, "第 1 轮：从 0 拉到 30，新增 30 行")
-    d = col.live_dir(col.channels[0], TESTID)
-    c.ok((d / "detail.csv").exists(), "live detail.csv 落盘了")
-    c.eq(live_csv_rows(d / "detail.csv"), 30, "live 文件里 30 行数据")
+    d = col.bucket_dir(col.channels[0], TESTID)
+    c.ok((d / "detail.csv").exists(), "桶里的 detail.csv 落盘了")
+    c.eq(csv_rows(d / "detail.csv"), 30, "桶里 30 行数据")
     prog = json.loads((d / "progress.json").read_text(encoding="utf-8-sig"))
     c.eq(prog["rows_collected"], 30, "★ 水位记到了 30")
     c.eq(prog["testid"], TESTID, "水位记着测试号")
@@ -191,7 +198,7 @@ def test_incremental(c: Checker) -> None:
          "只发了一次 download（分块没拆多余的）")
     prog = json.loads((d / "progress.json").read_text(encoding="utf-8-sig"))
     c.eq(prog["rows_collected"], 45, "水位推进到 45")
-    c.eq(live_csv_rows(d / "detail.csv"), 45, "文件里 45 行（30 旧 + 15 新，无重复）")
+    c.eq(csv_rows(d / "detail.csv"), 45, "文件里 45 行（30 旧 + 15 新，无重复）")
 
     # ---- 第 3 轮：没涨 → 什么都不做 ----
     n_dl_before = fake.calls.count("download")
@@ -201,21 +208,26 @@ def test_incremental(c: Checker) -> None:
 
     # ---- 第 4 轮：count 比水位还小 → 拒绝（宁缺勿乱）----
     fake.uploaded = 10
-    before = live_csv_rows(d / "detail.csv")
+    before = csv_rows(d / "detail.csv")
     added = col.incremental_pass(col.channels)
     c.eq(added, 0, "★ count 回退 → 拒绝拉取，0 行")
-    c.eq(live_csv_rows(d / "detail.csv"), before, "live 文件没被写乱")
+    c.eq(csv_rows(d / "detail.csv"), before, "桶文件没被写乱")
     prog = json.loads((d / "progress.json").read_text(encoding="utf-8-sig"))
     c.eq(prog["rows_collected"], 45, "水位也没动")
 
-    # ---- 第 5 轮：传完了 → 跳过（正式采集会接住）----
+    # ---- 第 5 轮：传完了 → **不跳过，把最后一段也加进桶**（水桶的最后一勺）----
+    #    ★ 2026-10-06：原来是"已传完 → 跳过，等正式采集接住"。水桶模型下那是错的：
+    #      "传完了"恰恰是**最该补上最后一段**的时刻。
     fake.uploaded = 60
     fake.detail_rows = 60
     fake.complete = True
     n_dl_before = fake.calls.count("download")
     added = col.incremental_pass(col.channels)
-    c.eq(added, 0, "★ 已传完的测试 → 跳过（等正式采集）")
-    c.eq(fake.calls.count("download") - n_dl_before, 0, "没发 download")
+    c.eq(added, 15, "★ 已传完 → 把最后 15 行也补进桶（不再跳过）")
+    c.eq(csv_rows(d / "detail.csv"), 60, "桶满：60 行")
+    prog = json.loads((d / "progress.json").read_text(encoding="utf-8-sig"))
+    c.ok(prog.get("finished") is True,
+         "★ 状态标记为「已结束」—— 报告据此决定要不要剔除被截断的末圈")
 
     # ---- 第 6 轮：换了测试号 → 另起新文件、水位清零 ----
     fake.testid = "266"
@@ -224,36 +236,34 @@ def test_incremental(c: Checker) -> None:
     fake.detail_rows = 20
     added = col.incremental_pass(col.channels)
     c.eq(added, 20, "换了测试号 → 从 0 拉 20 行")
-    d2 = col.live_dir(col.channels[0], "266")
-    c.ok((d2 / "detail.csv").exists(), "新测试有自己独立的 live 目录")
+    d2 = col.bucket_dir(col.channels[0], "266")
+    c.ok((d2 / "detail.csv").exists(), "新测试有自己的桶（按测试号分目录）")
     prog2 = json.loads((d2 / "progress.json").read_text(encoding="utf-8-sig"))
     c.eq(prog2["rows_collected"], 20, "新测试的水位从 20 开始（与旧测试无关）")
-    c.eq(live_csv_rows(d / "detail.csv"), 45, "旧测试的 live 文件原封不动")
+    c.eq(csv_rows(d / "detail.csv"), 60, "旧测试的桶原封不动（第 5 轮把尾巴补进去了，所以是 60）")
 
     # ---- 第 7 轮：水位文件坏了 → 拒绝（不能从头重拉造成重复）----
     (d2 / "progress.json").write_text("{ 这不是 JSON", encoding="utf-8")
     fake.uploaded = 25
     fake.detail_rows = 25
-    before = live_csv_rows(d2 / "detail.csv")
+    before = csv_rows(d2 / "detail.csv")
     added = col.incremental_pass(col.channels)
     c.eq(added, 0, "★ 水位损坏 → 拒绝拉取（绝不从头重拉造成重复行）")
-    c.eq(live_csv_rows(d2 / "detail.csv"), before, "文件没被写乱")
+    c.eq(csv_rows(d2 / "detail.csv"), before, "文件没被写乱")
 
-    # ---- 列格式与正式 detail.csv 一致（口径断言）----
-    fake2 = FakeTransport()
-    fake2.status = "finish"
-    col2 = make_collector(fake2)
-    col2.collect(col2.channels[0])
-    official = OUT / f"channel=27-188-10-2/testid={TESTID}/detail.csv"
-    live = d / "detail.csv"
-    if official.exists():
-        head = lambda p: p.open(encoding="utf-8-sig", newline="").readline().strip()
-        c.eq(head(live), head(official), "★ live 的列格式与正式 detail.csv 完全一致")
+    # ---- ★ 只有一个桶：不再有 live / 正式 两个位置 ----
+    #    以前这里比的是"live 文件 vs 正式 detail.csv"；现在两处合一，
+    #    改成断言"根本没有 live/ 这一层"—— 这才是本轮改动的核心。
+    c.ok(not (OUT / "live").exists(),
+         "★ 数据目录下不再有 live/ 这一层（增量与整采写同一个桶）")
+    c.eq(col.bucket_dir(col.channels[0], TESTID),
+         OUT / "channel=27-188-10-2" / f"testid={TESTID}",
+         "桶就是 channel=/testid=/（与原来的「正式数据集」同一个位置）")
 
     # ---- BOM 只在文件头出现一次（utf-8-sig 的 append 坑）----
-    raw = live.read_bytes()
+    raw = (d / "detail.csv").read_bytes()
     BOM = b"\xef\xbb\xbf"
-    c.ok(raw.startswith(BOM), "live 文件头带 BOM（Excel 打开不乱码）")
+    c.ok(raw.startswith(BOM), "桶文件头带 BOM（Excel 打开不乱码）")
     c.eq(raw.count(BOM), 1, "★ 追加没有再塞 BOM 进文件中间")
 
     # ---- 调度：下次时间点的算法 ----
@@ -278,9 +288,9 @@ def test_watch_channels(c: Checker) -> None:
     全拉进了 data/live/（255 MB）。别人的测试一概不该碰。
     """
     import collector as COL
-    c.ok(COL.WATCH_CHANNELS == "27-188-10-1,27-188-10-2,27-188-10-3,"
+    c.ok(COL.WATCH_CHANNELS == "27-188-10-1,27-188-10-2,27-188-10-3,27-188-10-4,"
                                "27-188-10-6,27-188-10-7,27-188-10-8",
-         "★ 默认通道清单就是本项目六颗", COL.WATCH_CHANNELS)
+         "★ 默认通道清单就是本项目七颗（2026-10-04 加入 10-4）", COL.WATCH_CHANNELS)
     ns = COL.build_parser().parse_args(["--incremental-now"])
     c.ok(getattr(ns, "channels", None) is None,
          "解析后 channels 为空 → 由 WATCH_CHANNELS 兜底（不是「全部通道」）")

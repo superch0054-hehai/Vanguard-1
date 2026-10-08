@@ -116,7 +116,7 @@ class Checker:
 
 def test_validator(c: Checker) -> None:
     """程序侧校验器要抓得住三类"数字全对、结论却错"的问题。"""
-    sys.path.insert(0, str(HERE))
+    sys.path.insert(0, str(SCAFFOLD))      # 报告脚本的唯一出处是脚手架（2026-10-04 起）
     import validate_paragraphs as V
 
     data = {"groups": {"A": {"avg_v_trend": "下降", "dV_trend": "减小",
@@ -173,7 +173,7 @@ def test_compose(c: Checker) -> None:
     if tmp.exists():
         shutil.rmtree(tmp)
     shutil.copytree(OUT, tmp)
-    sys.path.insert(0, str(HERE))
+    sys.path.insert(0, str(SCAFFOLD))      # 报告脚本的唯一出处是脚手架（2026-10-04 起）
     import compose_paragraphs as CP
     import json as _json
     # 用空段落目录，保证全部由合成器产出
@@ -227,16 +227,16 @@ def test_two_report_sets(c: Checker) -> None:
     rr = sp.run([sys.executable, "render.py"], cwd=str(out2),
                 capture_output=True, text=True, encoding="utf-8")
     c.ok(rr.returncode == 0, "正式集报告能渲染", (rr.stderr or "")[-200:])
-    h = (out2 / "SOH分析报告-正式数据集.html")
-    c.ok(h.exists(), "★ 正式集报告落到**另一个文件名**（不覆盖进行中那份）")
+    h = out2 / "SOH分析报告_10-1_vs_10-2-正式数据集.html"
+    c.ok(h.exists(), "★ 正式集报告落到**带来源与选择**的文件名（不覆盖进行中那份）")
     if h.exists():
         html = h.read_text(encoding="utf-8")
         c.ok("正式数据集" in html and "不是同一次测试" in html,
              "★ 报告横幅里写明了来源与「非同批」")
-        c.ok(not (out2 / "SOH分析报告.html").exists(),
+        c.ok(not (out2 / "SOH分析报告_10-1_vs_10-2.html").exists(),
              "正式集构建不会同时产出进行中那份（两套各自独立）")
     # 进行中那份的横幅必须写明"每日增量"
-    live_html = (OUT / "SOH分析报告.html")
+    live_html = (OUT / "SOH分析报告_10-1_vs_10-2.html")
     if live_html.exists():
         c.ok("每日增量" in live_html.read_text(encoding="utf-8"),
              "★ 进行中那份的横幅写明来源=每日增量")
@@ -270,23 +270,72 @@ def test_docs_match_scripts(c: Checker) -> None:
         c.ok(extra.exists(), f"脚手架里有 {extra.name}")
 
 
-def test_scaffold_in_sync(c: Checker) -> None:
-    """脚手架里的 render.py 必须与主代码**逐字节一致**。
+def test_empty_newest_test(c: Checker) -> None:
+    """★ 通道换了新测试之后，最新那个可能**一圈都没跑完** —— 不能闷头出一份空报告。
 
-    为什么：report_build 是把整个 `报告任务_脚手架/` 拷进任务包的，所以那份 render.py
-    才是真正跑起来的那个。今天一直是"改完手工 cp 过去"，一次忘掉就会出现
-    "本地测试全绿、盒子上跑的是旧渲染脚本" —— 这种错从结果上看不出来。
+    实测 2026-10-04：10-1 换到测试 282（0 圈），程序取了"最新"就往下走，
+    报告全空（图上没点、表里没数），却看着像"报告出来了" —— 从结果上看不出来。
+    """
+    import report_pack as RP
+    tmp = TMP / "_空测试"
+    if tmp.exists():
+        shutil.rmtree(tmp)
+    ch = tmp / "live" / "channel=27-188-10-1"
+
+    old = ch / "testid=263"          # 老测试：一个完整的充放对 → 1 圈
+    old.mkdir(parents=True)
+    (old / "detail.csv").write_text(
+        "seqid,stepid,cycleid,steptype,testtime,atime,volt,curr,cap,eng,CPU,dbc\n"
+        "1,1,0,cc,0,2026-10-01 00:00:00,1.0,1.4e-05,0,0,34.9,[]\n"
+        "2,1,0,cc,1000,2026-10-01 00:00:01,3.3,1.4e-05,0.001,0.002,34.9,[]\n"
+        "3,2,0,dc,0,2026-10-01 00:01:00,3.3,-1.4e-05,0,0,34.9,[]\n"
+        "4,2,0,dc,1000,2026-10-01 00:01:01,1.0,-1.4e-05,0.0009,0.0018,34.9,[]\n",
+        encoding="utf-8")
+    new = ch / "testid=282"          # 新测试：只有表头（刚起、0 圈）
+    new.mkdir(parents=True)
+    (new / "detail.csv").write_text(
+        "seqid,stepid,cycleid,steptype,testtime,atime,volt,curr,cap,eng,CPU,dbc\n",
+        encoding="utf-8")
+    # 该通道还另有一份"已结束的正式数据集"、测试号不同（244）——
+    # ★ 用来钉住一个真实的 bug：live 里明明有 264、却因为在 official 里找不到而误报"没有"
+    #   （2026-10-04 实测踩到，原因是"找不到就报错"写在了循环里、被第二个根触发）。
+    off = tmp / "channel=27-188-10-1" / "testid=244"
+    off.mkdir(parents=True)
+    (off / "detail.csv").write_text((old / "detail.csv").read_text(encoding="utf-8"),
+                                    encoding="utf-8")
+
+    got = RP.load_cell(tmp, "27-188-10-1", 2.0, source="live")
+    c.ok(bool(got.get("error")) and "0 圈" in got.get("error", ""),
+         "★ 最新测试一圈未跑完 → 明确报错（不交空报告）",
+         str(got.get("error"))[:70])
+    ok = RP.load_cell(tmp, "27-188-10-1", 2.0, source="live", testid=263)
+    c.ok(not ok.get("error") and ok.get("cs"),
+         "★ 显式指定 testid=263 → 正常拿到数据（另一份正式数据集号不同，不该误报）",
+         str(ok.get("error")))
+    bad = RP.load_cell(tmp, "27-188-10-1", 2.0, source="live", testid=999)
+    c.ok(bool(bad.get("error")) and "999" in bad.get("error", ""),
+         "指定不存在的 testid → 报错并列出该通道有哪些", str(bad.get("error"))[:70])
+    shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_scaffold_is_single_home(c: Checker) -> None:
+    """报告脚本（render / validate_paragraphs / compose_paragraphs）只允许存在一处：`报告任务_脚手架/`。
+
+    为什么：report_build 是把整个脚手架**拷进任务包**的，所以脚手架那份才是真正跑起来的。
+    2026-10-04 之前仓库根还留着一份"主代码"副本、靠"改完手工 cp 过去"保持同步 ——
+    那正是"改了这边、跑的是那边"的来源（本地测试全绿、盒子上跑的是旧脚本，还看不出来）。
+    现在只留一处：**重复出现就报错**，而不是再靠"记得 cp"。
     """
     for fn in ("render.py", "validate_paragraphs.py", "compose_paragraphs.py"):
-        a = (HERE / fn).read_bytes()
-        b = (SCAFFOLD / fn).read_bytes()
-        c.ok(a == b, f"★ 脚手架 {fn} 与主代码逐字节一致（跑一句 cp {fn} 报告任务_脚手架/）",
-             f"{len(a)} vs {len(b)} 字节")
+        c.ok((SCAFFOLD / fn).exists(), f"脚手架里有 {fn}（真正跑的那份）")
+        c.ok(not (HERE / fn).exists(),
+             f"★ 仓库根不再有 {fn} 的副本（唯一出处 = 报告任务_脚手架/）")
 
 
 def main() -> int:
     c = Checker()
-    test_scaffold_in_sync(c)
+    test_scaffold_is_single_home(c)
+    test_empty_newest_test(c)
     test_docs_match_scripts(c)
     test_validator(c)
 
@@ -322,7 +371,7 @@ def main() -> int:
                  "3.4  平均电压曲线分析", "FIG4", "3.5  dQ/dV 曲线分析", "FIG5",
                  "FIG6", "3.6  多组样品横向对比分析"],
          "★ 第 3 章小节与图号顺序与协会第二版报告一致", str(seq))
-    src = (HERE / "render.py").read_text(encoding="utf-8")
+    src = (SCAFFOLD / "render.py").read_text(encoding="utf-8")   # 唯一出处：脚手架
     for pre in ("对比_长循环_", "对比_首效VQ_", "对比_平均电压_", "对比_倍率_", "dQdV_"):
         c.ok(pre in src, f"render.py 里有图名片段：{pre}")
     # 真正的交叉验证在第 ⑤ 节：render 找不到图会写成"图 N 未生成"，
@@ -419,8 +468,8 @@ def main() -> int:
     rr = subprocess.run([sys.executable, "render.py"], cwd=str(OUT),
                         capture_output=True, text=True, encoding="utf-8")
     c.ok(rr.returncode == 0, "render 正常退出", (rr.stderr or "")[-400:])
-    html_p = OUT / "SOH分析报告.html"
-    c.ok(html_p.exists(), "产出 SOH分析报告.html")
+    html_p = OUT / "SOH分析报告_10-1_vs_10-2.html"      # 产物名带本次选择
+    c.ok(html_p.exists(), "产出 SOH分析报告_<A>_vs_<B>.html（文件名带选择）")
     if not html_p.exists():
         return c.report()
     html = html_p.read_text(encoding="utf-8")
@@ -451,7 +500,9 @@ def main() -> int:
     (OUT / "段落" / "S31A.txt").unlink()
     subprocess.run([sys.executable, "render.py"], cwd=str(OUT),
                    capture_output=True, text=True, encoding="utf-8")
-    html2 = (OUT / "SOH分析报告.html").read_text(encoding="utf-8")
+    # 产物名带本次选择（同 ⑥ 上面那条断言），重跑后读的也该是同一个名字
+    # —— 原来这里漏改，还写着旧的 `SOH分析报告.html`，于是整套 rc=1 提前抛异常。
+    html2 = (OUT / "SOH分析报告_10-1_vs_10-2.html").read_text(encoding="utf-8")
     c.ok("段落文件缺失" in html2, "★ 缺段落 → 报告里写明「未通过自动校验、需人工复核」")
 
     print()

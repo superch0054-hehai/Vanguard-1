@@ -14,6 +14,7 @@
 set -u
 cd "$(dirname "$0")" || exit 1
 PY="${PY:-python3}"
+export PYTHONUNBUFFERED=1    # 日志不被缓冲吞掉（排查时能看见错在哪一步）
 echo "── ① 程序段按最新数据重填 ──"
 "$PY" compose_paragraphs.py --mode refresh || exit 1
 

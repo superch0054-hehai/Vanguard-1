@@ -115,18 +115,30 @@ def share_rel_path(dsrc: Path) -> Path:
 
 
 def load_manifest(data_dir: Path) -> list[dict[str, Any]]:
+    """读索引。
+
+    ★ 2026-10-06：**按 key 去重、最后一行算数**。水桶模型下同一轮测试会被记多次
+    （第一次加水记一笔、结束时再记一笔更新），JSONL 只能追加；不去重的话
+    数据集清单里同一份数据会出现好几遍。
+    """
     mf = data_dir / "manifest.jsonl"
     if not mf.exists():
         return []
-    out = []
+    latest: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
     for line in mf.read_text(encoding="utf-8").splitlines():
         line = line.strip()
-        if line:
-            try:
-                out.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-    return out
+        if not line:
+            continue
+        try:
+            r = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        k = r.get("key") or f"#{len(order)}"
+        if k not in latest:
+            order.append(k)
+        latest[k] = r
+    return [latest[k] for k in order]
 
 
 # ---------------------------------------------------------------------------
@@ -280,7 +292,7 @@ def build_readme(recs: list[dict], generated: str) -> str:
     a("README.md               ← 你正在看的这份（口径规则）")
     a("datasets.md             ← 数据集索引（已结束的正式数据集）")
     a("报告任务/               ← ★ 报告工作区：任务说明.md + 提示词 + 数据包 + 渲染脚本")
-    a("live/                   ← ★ 正在跑的测试（每日增量，说明见 live/README.md）")
+    a("channel=<通道>/testid=<测试号>/  ← ★ 一个测试一个「桶」：detail.csv + steps.csv + progress.json")
     a("channel=<通道>/testid=<测试号>/")
     a("    ├── summary.md      ← ★ 该数据集的摘要（指标＋规模＋文件清单）")
     a("    ├── steps.csv       ← 工步层（小，可以直接读）")
@@ -329,17 +341,27 @@ def build_readme(recs: list[dict], generated: str) -> str:
     a("")
     a("### ③ 要算容量保持率（摘要里没有时）")
     a("")
+    a("★ **规则的唯一出处是 `报告工具/probe.py` 的 `group_cycles()` / `cycle_index_of()`**")
+    a("—— 能 import 就用它，别自己再抄一份（抄出来的那份不会跟着修）。")
+    a("下面是**没得 import 时**的手写版：")
+    a("")
     a("```python")
     a("import pandas as pd")
     a("df = pd.read_csv('channel=.../testid=.../steps.csv')")
     a("kinds = df['steptype'].str.strip().str.lower()")
-    a("")
-    a("# ★ 别用 cycleid 分组！多段循环的方案下它会重复（两圈并成一圈）。")
-    a("#   正确做法：按「充电阶段」切 —— 已经放过电之后，再遇到充电类工步就是新的一圈。")
-    a("#   （和 probe.py 里 group_cycles() 的做法一致）")
     a("CHG = ['cc', 'cv', 'cccv', 'pcccv', 'cp', 'cr', 'pulse']")
     a("DIS = ['dc', 'dv', 'cccd', 'dp', 'dr']")
-    a("cycle_no = ((kinds.isin(CHG)) & (kinds.isin(DIS).cumsum() > 0)).cumsum()")
+    a("")
+    a("# ★ 别用 cycleid 分组！多段循环的方案下它会重复（两圈并成一圈），")
+    a("#   一个 cycleid 里甚至可能塞两对充放 —— 那样容量会凭空翻倍。")
+    a("#   正确做法：按工步序列切 —— 新的一圈起于「领头方向」的工步，")
+    a("#   领头方向 = 第一个非搁置工步的方向。")
+    a("#   ★ 本项目是负极半电池 Na‖HC，**先放后充（dc→cc）** → 领头方向是「放电」；")
+    a("#     正极/全电池是先充后放 → 领头方向是「充电」。")
+    a("#     套错方向不会报错，只会**静默失效**（切出来的块全不合格，退回 cycleid）。")
+    a("nz = kinds[kinds.isin(CHG + DIS)]")
+    a("lead, other = (CHG, DIS) if nz.iloc[0] in DIS else (DIS, CHG)")
+    a("cycle_no = (kinds.isin(lead) & (kinds.isin(other).cumsum() > 0)).cumsum()")
     a("")
     a("dis = df[kinds.isin(DIS)]")
     a("per_cycle = dis.groupby(cycle_no[kinds.isin(DIS)])['cap'].sum().sort_index()")
@@ -348,6 +370,10 @@ def build_readme(recs: list[dict], generated: str) -> str:
     a("retention = per_cycle.iloc[-1] / per_cycle.iloc[0] * 100")
     a("print(f'{retention:.2f} %')")
     a("```")
+    a("")
+    a("> ⚠️ 保持率的口径还有两个坑：**第 1 圈可能是化成（预充）**，容量比正常圈大好几倍，")
+    a("> 拿它当基准会把保持率算得严重偏低；协会报告的基线是**第 4 圈**（化成之后的")
+    a("> 首个 1C 循环）。基线到底用哪一圈**是要问王涛老师/协会的**，不要自己定。")
     a("")
     a("### ④ 要画容量-循环曲线")
     a("")
@@ -363,8 +389,10 @@ def build_readme(recs: list[dict], generated: str) -> str:
     a("")
     a("```python")
     a("df = pd.read_csv('channel=.../testid=.../detail.csv')")
-    a("# ★ 明细的 cycleid 比工步层小 1：想看第 55 圈，这里用 54")
-    a("one = df[df['cycleid'] == 54].sort_values('seqid')")
+    a("# ★ 圈号用 ③ 的**同一套算法**（按工步序列重算），别用明细的 cycleid：")
+    a("#   它会重复、还会一圈塞两对充放 —— 照它取会把两圈的曲线画成一条。")
+    a("#   具体做法：把 ③ 的代码段换成读 detail.csv，得到 cyc 列，再下面这样取圈：")
+    a("one = df[df['cyc'] == 55].sort_values('seqid')   # 第 55 圈")
     a("plt.plot(one['cap'] * 1000, one['volt'])   # 容量原始是 Ah，×1000 得 mAh；电压 V")
     a("```")
     a("")
@@ -421,11 +449,24 @@ def build_agent_entry(recs: list[dict], live_entries: list[dict], generated: str
     a("```")
     a("")
     a("3. 报告产物**只有这两个**：")
-    a("   - `报告任务/SOH分析报告.html` —— **进行中**测试的每日增量（阶段性报告）")
-    a("   - `报告任务-正式数据集/SOH分析报告-正式数据集.html` —— **已结束**的正式数据集")
+    a("   - `报告任务/SOH分析报告_<通道A>_vs_<通道B>.html` —— **进行中**的每日增量（阶段性；文件名带本次选择）")
+    a("   - `报告任务/SOH分析报告_<A>_vs_<B>-正式数据集.html` —— 用**已结束**的正式数据集")
     a("")
     a("**不要**自己读 CSV 另写一份报告（例如 `某某分析报告.md`）：数值口径、图号表号、"
       "章节结构全在上面那条链里，自己写的对不上数据包，还容易被下面的旧数据集带偏。")
+    a("")
+    a("### 如果主人**点名了两个通道**（例如「10-1 和 10-3」）")
+    a("")
+    a("可选通道：**10-1 / 10-2 / 10-3 / 10-6 / 10-7 / 10-8**（当前在跑的六颗）。")
+    a("跑这一条就行 —— 工具与数据都在本共享目录里，**不用等人帮忙**：")
+    a("")
+    a("```")
+    a("bash 换通道出报告.sh 10-1 10-3            # 进行中数据（每日增量）")
+    a("bash 换通道出报告.sh 10-1 10-3 official   # 已结束的正式数据集")
+    a("```")
+    a("")
+    a("它内部会：用这两个通道重建任务包 → 程序填数据句 → **AI 写 3.6/4.1/4.2/4.3/5.2** → "
+      "校验 → 渲染。约 3~5 分钟，产物仍是 `报告任务/SOH分析报告.html`。")
     a("")
     a("## 二、当前进行中的测试（live）")
     a("")
@@ -441,15 +482,15 @@ def build_agent_entry(recs: list[dict], live_entries: list[dict], generated: str
     else:
         a("| （当前没有正在跑的测试） | | | | |")
     a("")
-    a("> ⚠️ `live/` 是**进行中**测试的每日增量；同通道下 `channel=…/testid=247`、"
-      "`testid=244` 那些是**旧测试**（已结束），不要当成当前这颗电芯。")
+    a("> ⚠️ 同一个通道下会有**多轮测试**（各自的 `testid=`）。"
+      "哪一轮是当前在跑的，看该轮的 `progress.json`：`finished: false` 就是还在跑。")
     a("")
     a("## 三、只有要自己看数据时，才读下面这些")
     a("")
     a("- `README.md` —— 全套口径规则（单位 ×1000、圈号、保持率基线、效率方向…）；")
     a("- `datasets.md` —— 数据集索引（**已结束的正式数据集**，均为旧测试）；")
     a("- `channel=<通道>/testid=<测试号>/summary.md` —— 某份正式数据集的摘要；")
-    a("- `live/README.md` —— live 区怎么读。")
+    a("- `<通道>/<测试号>/progress.json` —— 水位 + **这轮跑完没有**（`finished`）。")
     a("")
     return "\n".join(L) + "\n"
 
@@ -463,7 +504,7 @@ def build_index(recs: list[dict], generated: str, data_dir: Path,
     a(f"> 生成时间：{generated}")
     a("")
     a("> ★ **要出报告**：读 `报告任务/任务说明.md` 并按里面的三条命令跑；"
-      "**进行中的测试在 `live/`**（见下），本表列的是**已结束的正式数据集**。")
+      "**一个测试一个「桶」**（`channel=/testid=/`）：`progress.json` 里的 `finished` 说明这轮跑完没有。")
     a("")
     if not recs:
         a("（还没有数据。等测试跑完、采集程序自动采集后会出现在这里。）")
@@ -500,8 +541,8 @@ def build_index(recs: list[dict], generated: str, data_dir: Path,
     a("")
     a("例如 `channel=27-188-10-1/testid=247/summary.md`。")
     a("")
-    a("> ⚠️ 这些是**旧测试**：同通道当前正在跑的那颗在 `live/` 里，"
-      "通道与测试号的对应关系见本目录的 `AGENTS.md`。")
+    a("> ⚠️ 这些是**旧测试**：同通道当前在跑的那一轮见本目录的 `AGENTS.md`。"
+      "（判断依据：该轮 `progress.json` 的 `finished` 是否为 false。）")
     a("")
     if any(not r.get("upload_complete") for r in recs):
         a("> ⚠️ 表里有标记「未传完」的数据集 —— 当时测试还在跑，数据可能不完整。")
@@ -806,51 +847,6 @@ def collect_live_entries(data_dir: Path) -> list[dict]:
     return out
 
 
-def build_live_md(entries: list[dict], generated: str) -> str:
-    """live/ 区给 Agent 看的说明 —— 它看不见采集器，只能靠这份文件理解 live 是什么。"""
-    L: list[str] = []
-    a = L.append
-    a("# live —— 正在跑的测试（每日增量）")
-    a("")
-    a(f"> 生成时间 {generated}")
-    a("")
-    a("**这是什么**：还没跑完的测试，采集器每天 02:00 自动追加一次明细。")
-    a("**让你不用等电池测完，也能看到它测到哪了。**")
-    a("")
-    a("## 怎么读")
-    a("")
-    a("- `detail.csv` 的**列格式与正式数据集的 detail.csv 完全一致**，")
-    a("  同样是原始口径 **A / Ah / Wh**（显示成 mA/mAh/mWh 要 ×1000），")
-    a("  充电为正、放电为负，`detail.cycleid` 比 `steps.cycleid` 小 1。")
-    a("- `progress.json`：`rows_collected` 是**已拉到第几条**（水位），")
-    a("  `total_on_device` 是设备端总数，`updated_at` 是最近一次追加时间。")
-    a("- 文件**每天都会变长** —— 读的时候以当前文件为准，不要缓存行数。")
-    a("")
-    a("## ★ 和正式数据集的关系")
-    a("")
-    a("本区是**进行中测试的每日增量**：**可以据此出阶段性报告**")
-    a("（报告里必须注明数据来源=每日增量、以及数据截止时间，见 `报告任务/任务说明.md`）。")
-    a("测试结束后采集器会做一次完整采集，那才是**正式数据集**")
-    a("（上一级的 `channel=…/testid=…/`，带 summary.md），**正式结论以它为最终依据**。")
-    a("")
-    a("> ⚠️ 上一级的 `channel=…/testid=247`、`testid=244` 是**旧测试**，"
-      "不要把它们当成当前这三颗电芯。")
-    a("")
-    a("## 当前有哪些")
-    a("")
-    a("| 通道 | 测试号 | 已拉行数 | 设备端总数 | 最近更新 |")
-    a("|---|---|---|---|---|")
-    if entries:
-        for e in entries:
-            a("| {} | {} | {} | {} | {} |".format(
-                e["channel"], e["testid"],
-                e["rows"] if e["rows"] is not None else "—",
-                e["total"] if e["total"] is not None else "—",
-                e["updated_at"] or "—"))
-    else:
-        a("| （当前没有正在跑的测试） | | | | |")
-    a("")
-    return "\n".join(L) + "\n"
 
 
 def main() -> int:
@@ -904,26 +900,15 @@ def main() -> int:
                 json.dumps(r, ensure_ascii=False, indent=2, default=str),
                 encoding="utf-8")
 
-    # ---------- 1b. 复制 live 区（进行中测试的每日增量）----------
-    # 为什么共享它：Agent 在容器里只能看到本目录 —— 不把 live 递进来，
-    # 它就永远不知道"昨天测到哪了"（实测它找遍全盘也找不到 data/live/）。
-    live_entries = collect_live_entries(data_dir)
-    live_files = 0
-    if not args.docs_only:
-        for e in live_entries:
-            src = (data_dir / "live" / f"channel={e['channel']}"
-                   / f"testid={e['testid']}")
-            dst = (share_dir / "live" / f"channel={e['channel']}"
-                   / f"testid={e['testid']}")
-            dst.mkdir(parents=True, exist_ok=True)
-            for name in ("detail.csv", "progress.json"):
-                f = src / name
-                if f.is_file():
-                    shutil.copy2(f, dst / name)
-                    live_files += 1
-    print(f"  复制了 {live_files} 个 live 增量文件（进行中的测试，共 "
-          f"{len(live_entries)} 个）")
+    # ---------- 1b.（已取消）原来这里把"正在跑的测试"拷进共享目录的 live/ 区 ----------
+    # ★ 2026-10-06：水桶模型下没有 live 区了 —— "进行中/已结束"由每个桶自己的
+    #   progress.json 表达，桶本身就在下面的数据集列表里。这段保留会**重建 live/**，
+    #   让 Agent 以为里面是"正在跑的测试"（其实是旧快照）。
     print(f"  复制了 {copied} 个数据文件")
+
+    # 下游还有几个函数接 live_entries 这个参数（用来给「已被 live 取代」打标签）；
+    # 水桶模型下没有 live 区了，所以固定给空列表 —— 那些标签自然不会再出现。
+    live_entries: list[dict] = []
 
     # ---------- 2. 生成文档 ----------
     (share_dir / "README.md").write_text(
@@ -934,10 +919,10 @@ def main() -> int:
     entry = build_agent_entry(recs, live_entries, generated)
     for fn in ("AGENTS.md", "00-先读我.md"):
         (share_dir / fn).write_text(entry, encoding="utf-8")
-    live_share = share_dir / "live"
-    live_share.mkdir(parents=True, exist_ok=True)
-    (live_share / "README.md").write_text(
-        build_live_md(live_entries, generated), encoding="utf-8")
+    # ★ 2026-10-06：不再生成 live/ 区。
+    #   水桶模型下"进行中/已结束"由每个桶自己的 progress.json 表达，
+    #   live/ 这个并行目录已经取消（原来它会**每次都被重建**，
+    #   于是删了还会长回来、并且让 Agent 以为里面是"正在跑的测试"）。
     for r in recs:
         src = resolve_dataset_dir(r, data_dir)
         if src is None:

@@ -122,6 +122,68 @@ def test_cycles_of_detail(c: Checker) -> None:
     c.ok(all(r["dcir_mohm"] is None for r in cs_detail),
          "明细层口径的 dcir 恒为 None（诚实标注，不假装有内阻）")
 
+
+def test_detail_resharding(c: Checker) -> None:
+    """★ 一个 cycleid 里塞了两对充放（实测 10-1 的 cycleid=2：stepid 2/4 与 7/9）。
+
+    按 cycleid 累加会把**两圈的容量加到一起** —— 某圈容量凭空翻倍（旧代码：
+    0.009+0.0085 = 17.5 mAh 全落在同一圈上），衰减拟合就给出 +12523 这种
+    荒唐速率；report_pack 里那条"有跳变就不给速率"的规避就是为它写的。
+    圈号必须按**工步序列**重算（probe.group_cycles / cycle_index_of）。
+    """
+    # 两对充放，共用一个 cycleid="2"；每个工步拆 5 条 ramp（末条 = 工步容量）
+    spec = [("2", "2", "dc", 0.0090, -2e-3),
+            ("2", "4", "cc", 0.0120, 1e-5),
+            ("2", "7", "dc", 0.0085, -1e-2),
+            ("2", "9", "cc", 0.0120, 1e-5)]
+    detail, seq = [], 0
+    for cid, sid, st, cap, curr in spec:
+        for k in range(1, 6):
+            seq += 1
+            f = k / 5
+            detail.append(dict(seqid=str(seq), stepid=sid, cycleid=cid, steptype=st,
+                               testtime=str(k * 1000), atime="2026-10-01 02:00:00",
+                               volt=str(2.0 + 0.5 * f), curr=str(curr),
+                               cap=str(cap * f), eng=str(cap * 0.7 * f),
+                               CPU="34.9", dbc="[]"))
+
+    cs = cycles_of_detail(detail)
+    c.ok(len(cs) == 2,
+         "★ 一个 cycleid 里两对充放 → 重算出 2 圈（按 cycleid 只有 1 圈）", f"{len(cs)} 圈")
+    c.ok([r["cycle"] for r in cs] == [1, 2], "圈号是顺序号 1、2",
+         str([r["cycle"] for r in cs]))
+    c.ok(abs(cs[0]["dis"] - 9.0) < 1e-9,
+         "第 1 圈放电容量 = 9.0 mAh（本圈的，不是两圈之和）", str(cs[0]["dis"]))
+    c.ok(abs(cs[1]["dis"] - 8.5) < 1e-9, "第 2 圈放电容量 = 8.5 mAh", str(cs[1]["dis"]))
+    c.ok(abs(sum(r["dis"] for r in cs) - 17.5) < 1e-9,
+         "两圈之和 = 17.5 mAh（确实拆成了两圈）")
+    c.ok(all(abs(r["dis"] - 17.5) > 1e-9 for r in cs),
+         "★ 没有任何一圈拿到 17.5 —— 容量没翻倍")
+
+    # 取圈要取到正确的行：第 1 圈只有 stepid 2/4，第 2 圈只有 7/9
+    one = figures._detail_cycle_rows(detail, 1)
+    c.ok(sorted({r["stepid"] for r in one}) == ["2", "4"],
+         "★ 第 1 圈只取到 stepid 2/4（不把下一圈的 7/9 也算进来）",
+         str(sorted({r["stepid"] for r in one})))
+    two_sids = sorted({r["stepid"] for r in figures._detail_cycle_rows(detail, 2)})
+    c.ok(two_sids == ["7", "9"], "第 2 圈取到 stepid 7/9", str(two_sids))
+
+    # V-Q 曲线同理：两条曲线各含本圈的放电段
+    v1 = vq_curves(detail, cycle=1, exact=True)
+    v2 = vq_curves(detail, cycle=2, exact=True)
+    c.ok(v1 and abs(max(q for q, _ in v1["discharge"]) - 9.0) < 1e-9,
+         "★ 第 1 圈 V-Q 曲线只含本圈放电（9.0 mAh）")
+    c.ok(v2 and abs(max(q for q, _ in v2["discharge"]) - 8.5) < 1e-9,
+         "第 2 圈 V-Q 曲线只含本圈放电（8.5 mAh）")
+
+    # 交叉验证：同样四个工步喂给工步层口径（根本没有 cycleid），结果必须一致
+    steps = [dict(steptype=st, cap=cap, eng=cap * 0.7, startcurr=curr, dcir=0.0)
+             for (_cid, _sid, st, cap, curr) in spec]
+    key = lambda rs: [(r["cycle"], round(r["dis"], 6), round(r["chg"], 6)) for r in rs]
+    c.ok(key(cs) == key(cycles_of(steps)),
+         "★ 明细层与工步层两条路径在「一个 cycleid 两对充放」上一致",
+         f"{key(cs)} vs {key(cycles_of(steps))}")
+
     print()
     print(f"  （合成明细 {len(detail)} 行 ↔ 合成工步 {len(steps)} 行，交叉验证）")
 
@@ -792,6 +854,12 @@ def main() -> int:
     print("⑨ ★ live 数据源：cycles_of_detail（明细层口径）与 cycles_of 交叉验证")
     print(BAR)
     test_cycles_of_detail(c)
+
+    print()
+    print(BAR)
+    print("⑨c ★ 一个 cycleid 塞两对充放 → 圈号重算（否则容量翻倍）")
+    print(BAR)
+    test_detail_resharding(c)
 
     print()
     print(BAR)
