@@ -29,7 +29,9 @@ AUTH="$HOME/batterylab/报告任务_脚手架"         # 脚手架的唯一出�
 SCAF="$HERE/报告任务_脚手架"
 CH_A="${1:?用法: bash 换通道出报告.sh <通道A> <通道B> [live|official]}"
 CH_B="${2:?用法: bash 换通道出报告.sh <通道A> <通道B> [live|official]}"
-SRC="${3:-live}"
+# ★ 2026-10-09：默认改成 auto —— 合并成一个位置后，"进行中/已结束"由桶的
+#   progress.json 决定，引用方不必再猜"这轮跑完没有"。想只看某种状态再显式给。
+SRC="${3:-auto}"
 case "$SRC" in live|official|auto) ;; *) echo "第三个参数只能是 live / official / auto"; exit 2;; esac
 
 # ── 闸门①：.sh 行尾符 ───────────────────────────────────────────────────────
@@ -53,6 +55,12 @@ if [ -d "$AUTH" ]; then
     cmp -s "$f" "$SCAF/$b" || { echo "  ❌ 脚手架同步后仍不一致：$b" >&2; bad=1; }
   done
   [ "$bad" = "0" ] || { echo "❌ 脚手架两侧不一致，拒绝建包（先跑 部署.sh）" >&2; exit 3; }
+  # ★ 2026-10-09：cp -a 只拷不删 —— 本地删掉的文件，共享目录这份也得消失，
+  #   否则旧文件会一直留着、还会被拷进任务包。
+  for f in "$SCAF"/*; do
+    b=$(basename "$f")
+    [ -e "$AUTH/$b" ] || { rm -rf "$f"; echo "  🧹 脚手架删掉（权威版已无）：$b"; }
+  done
   echo "（脚手架已从 ~/batterylab 同步并核对一致）"
 else
   echo "⚠️  找不到权威脚手架 $AUTH，用共享目录里那份继续（结果可能不是最新的）" >&2
@@ -101,6 +109,14 @@ ARGS=(--ch-a "$CH_A" --ch-b "$CH_B" --source "$SRC" --mass-mg "${MASS_MG:-2}"
 # 想用上一轮的数据就显式给：TESTID_A=263 TESTID_B=264 bash 换通道出报告.sh 10-1 10-2
 [ -n "${TESTID_A:-}" ] && ARGS+=(--testid-a "$TESTID_A")
 [ -n "${TESTID_B:-}" ] && ARGS+=(--testid-b "$TESTID_B")
+# ★ 2026-10-09：对②（倍率那对）—— 用环境变量传，不动位置参数
+[ -n "${CH_C:-}" ] && ARGS+=(--ch-c "$CH_C")
+[ -n "${CH_D:-}" ] && ARGS+=(--ch-d "$CH_D")
+[ -n "${LABEL_C:-}" ] && ARGS+=(--label-c "$LABEL_C")
+[ -n "${LABEL_D:-}" ] && ARGS+=(--label-d "$LABEL_D")
+# 变量（进表 1 与 4.2 机制段）。不填则用 report_pack 里本批的默认值（PBSF 1 wt%）
+[ -n "${VARIABLE:-}" ] && ARGS+=(--variable "$VARIABLE")
+[ -n "${DOSAGE:-}" ] && ARGS+=(--dosage "$DOSAGE")
 [ -n "${LABEL_A:-}" ] && echo "  样品名：A=$LABEL_A  B=${LABEL_B:-$LABEL_A}" \
                       || echo "  ⚠️  未给 LABEL_A/LABEL_B —— 体系/变量信息会缺失（见闸门④）"
 "$PY" -u "$TOOLS/report_build.py" "${ARGS[@]}" || exit 1
@@ -124,7 +140,7 @@ fi
 if [ "$ph_cnt" != "0" ]; then
   echo "❌ 有 $ph_cnt 段是「数据不足」占位：$ph_files" >&2
   echo "   原因通常是**没给样品名** → 程序不知道实验变量是什么（report_pack._is_std_q_pair）。" >&2
-  echo "   补法：  LABEL_A=STD LABEL_B='1% Q④' bash $0 $CH_A $CH_B $SRC" >&2
+  echo "   补法：把样品名与变量传下去，例如 LABEL_A=长循环实验样 LABEL_C=倍率实验样 \n         VARIABLE='电解液添加剂（PBSF，1 wt%）' bash $0 $CH_A $CH_B $SRC" >&2
   echo "   （占位段是「程序不知道」，不是「数据没有」—— 校验器**认它为合格**，所以只靠校验发现不了）" >&2
   if [ "${ALLOW_PLACEHOLDERS:-0}" = "1" ]; then
     echo "   ALLOW_PLACEHOLDERS=1：已知情，继续（报告里仍会显示这些占位）" >&2

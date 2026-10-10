@@ -25,14 +25,14 @@ OUT = TMP / "任务包"
 SCAFFOLD = HERE / "报告任务_脚手架"
 BAR = "=" * 66
 
-# 期望的六张图（文件名 = 渲染模板 FIGURE:1..6 必须对上的那几张）
+# 期望的五张图（文件名 = 渲染模板 FIGURE:1..5 必须对上的那几张；图 6 已取消）
 WANT_FIGS = [
     "对比_长循环_STD_vs_1%Q④.svg",
     "对比_首效VQ_STD_vs_1%Q④.svg",
     "对比_平均电压_STD_vs_1%Q④.svg",
     "对比_倍率_STD_vs_1%Q④.svg",
-    "dQdV_STD.svg",
-    "dQdV_1%Q④.svg",
+    # ★ 2026-10-09：dQ/dV 从「每样品一张」改成「每对一张」（图 6 取消）
+    "dQdV_STD_vs_1%Q④.svg",
 ]
 BLOCKS = ("S11", "S12", "S31A", "S31B", "S31C", "S32A", "S32B", "S32C", "S32D",
           "S33A", "S33B", "S34A", "S34B", "S34C", "S35A", "S35B", "S35C",
@@ -250,8 +250,10 @@ def test_docs_match_scripts(c: Checker) -> None:
     实测"新入口 出报告.sh 在文档里出现 0 次"、而文档还在教 `--mode all`
     （那条命令把 AI 写的 9 段冲回了模板句）。文档与代码的一致性得由测试看着。
     """
-    docs = [SCAFFOLD / "任务说明.md", SCAFFOLD / "批量写作-3.6_4.2_4.3_5.2.md",
-            SCAFFOLD / "_system_prompt.txt"]
+    # ★ 2026-10-09：Agent 壳已清（任务说明.md / 批量写作*.md 删除）。报告链路不经过
+    #   Agent —— 工作流就是 出报告.sh 那一条命令。_system_prompt.txt 要留：
+    #   它是**模型的**系统提示词，由 write_ai_sections.py 读。
+    docs = [SCAFFOLD / "_system_prompt.txt"]
     src = (HERE / "make_share.py").read_text(encoding="utf-8")     # 入口页文本在这里生成
     text = chr(10).join(d.read_text(encoding="utf-8") for d in docs if d.exists()) + src
     named = sorted(set(re.findall(r"(?:python3|bash)\s+([A-Za-z_][\w\-]*\.(?:py|sh))", text)))
@@ -260,12 +262,8 @@ def test_docs_match_scripts(c: Checker) -> None:
         c.ok((SCAFFOLD / m).exists() or (HERE / m).exists(),
              f"★ 文档点名的脚本真实存在：{m}")
 
-    runbook = (SCAFFOLD / "任务说明.md").read_text(encoding="utf-8")
-    c.ok("出报告.sh" in runbook, "★ 任务说明给的是唯一入口 出报告.sh")
-    c.ok("--mode all" not in runbook,
-         "★ 任务说明不再推荐 --mode all（它曾把 AI 正文刷回模板句）")
-    c.ok("write_ai_sections" in runbook and "split_batch" in runbook,
-         "★ 任务说明写明了「AI 撰写」与「拆段过闸」两步")
+    # 原来这里断言 任务说明.md 的内容（它是 Agent 的工作流出处）。
+    # Agent 壳清掉后，流程的唯一出处就是 出报告.sh 本身。
     for extra in (SCAFFOLD / "出报告.sh", SCAFFOLD / "write_ai_sections.py"):
         c.ok(extra.exists(), f"脚手架里有 {extra.name}")
 
@@ -318,6 +316,46 @@ def test_empty_newest_test(c: Checker) -> None:
     shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_bucket_layout_source(c: Checker) -> None:
+    """桶布局下 --source 的语义：**状态由 progress.json 决定，不由目录决定**。
+
+    为什么单列一条：2026-10-09 把 --source 的筛选错加在"目录"上，于是
+    `--source live` 把真正的桶（在 data/channel=/testid=/ 下）整个排除，
+    报告报"找不到数据目录" —— 而老夹具（有 live/ 目录）照样绿，**没抓住**。
+    所以这里用**真实的桶布局**钉住这条语义。
+    """
+    import report_pack as RP
+    tmp = TMP / "_桶布局"
+    if tmp.exists():
+        shutil.rmtree(tmp)
+    ch = tmp / "channel=27-188-10-1" / "testid=282"      # 桶直接在 data 根下
+    ch.mkdir(parents=True)
+    NL = chr(10)
+    lines = ["seqid,stepid,cycleid,steptype,testtime,atime,volt,curr,cap,eng,CPU,dbc",
+             "1,1,0,cc,0,2026-10-01 00:00:00,1.0,1.4e-05,0,0,34.9,[]",
+             "2,1,0,cc,1000,2026-10-01 00:00:01,3.3,1.4e-05,0.001,0.002,34.9,[]",
+             "3,2,0,dc,0,2026-10-01 00:01:00,3.3,-1.4e-05,0,0,34.9,[]",
+             "4,2,0,dc,1000,2026-10-01 00:01:01,1.0,-1.4e-05,0.0009,0.0018,34.9,[]"]
+    (ch / "detail.csv").write_text(NL.join(lines) + NL, encoding="utf-8")
+
+    def write_prog(finished: bool) -> None:
+        (ch / "progress.json").write_text(json.dumps(
+            {"testid": "282", "rows_collected": 4, "total_on_device": 4,
+             "finished": finished}), encoding="utf-8")
+
+    write_prog(False)
+    live = RP.load_cell(tmp, "27-188-10-1", 2.0, source="live")
+    c.ok(bool(live) and not live.get("error"),
+         "★ 桶布局（finished=false）+ --source live → 找得到数据", str(live.get("error"))[:60])
+    c.ok(bool(live.get("cs")), "★ 桶布局下确实取到了内容")
+    write_prog(True)
+    c.ok(not RP.load_cell(tmp, "27-188-10-1", 2.0, source="live"),
+         "★ 同一目录、标成 finished=true 后，--source live 就查不到了")
+    c.ok(bool(RP.load_cell(tmp, "27-188-10-1", 2.0, source="official")),
+         "★ 同一目录、--source official 能查到（状态随 progress.json 走）")
+    shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_scaffold_is_single_home(c: Checker) -> None:
     """报告脚本（render / validate_paragraphs / compose_paragraphs）只允许存在一处：`报告任务_脚手架/`。
 
@@ -335,6 +373,7 @@ def test_scaffold_is_single_home(c: Checker) -> None:
 def main() -> int:
     c = Checker()
     test_scaffold_is_single_home(c)
+    test_bucket_layout_source(c)
     test_empty_newest_test(c)
     test_docs_match_scripts(c)
     test_validator(c)
@@ -350,7 +389,7 @@ def main() -> int:
 
     print()
     print(BAR)
-    print("② 六张图与图位一一对上（平均电压图消失过，就是这里没测）")
+    print("② 五张图与图位一一对上（平均电压图消失过，就是这里没测）")
     print(BAR)
     for name in WANT_FIGS:
         p = OUT / "图" / name
@@ -358,18 +397,27 @@ def main() -> int:
              f"图存在且非空：{name}", f"{p.stat().st_size if p.exists() else '缺失'} 字节")
     tmpl = (SCAFFOLD / "报告渲染模板.html").read_text(encoding="utf-8")
     slots = sorted(set(re.findall(r"<!--FIGURE:(\d+)-->", tmpl)), key=int)
-    c.ok(slots == ["1", "2", "3", "4", "5", "6"],
-         "★ 模板有 FIGURE:1~6 六个图位", str(slots))
+    c.ok(slots == ["1", "2", "3", "4", "5"],
+         "★ 模板有 FIGURE:1~5 五个图位（图 6 已取消）", str(slots))
+    # ★ 样式块必须真的把 CSS 包在里面：2026-10-03 起模板里多出一对**空的**
+    #   `<style></style>`，CSS 被挡到正文里 —— 报告打开就是满屏样式文字。
+    #   因为谁也没直接打开 HTML 看，一直潜伏到 10-09 才被发现。
+    c.ok(tmpl.count("<style>") == 1 and tmpl.count("</style>") == 1,
+         "模板只有一对 <style>/</style>",
+         "[开=%d 闭=%d]" % (tmpl.count("<style>"), tmpl.count("</style>")))
+    _i, _j = tmpl.find("<style>"), tmpl.find("</style>")
+    c.ok(_i < _j and ":root{" in tmpl[_i:_j],
+         "★ CSS 真的在 <style> 里面（否则样式会当正文显示）")
     # ★ 章节与图号顺序必须与《协会第二版报告》一致：
     #   3.1 长循环 → 3.2 倍率 → 3.3 首圈库伦效率 → 3.4 平均电压 →
-    #   3.5 dQ/dV → 3.6 横向对比（图 1~6 一一对应）
+    #   3.5 dQ/dV → 3.6 横向对比（图 1~5 一一对应；图 6 已取消）
     body = tmpl.split("sec-3-1-长循环性能分析")[1].split("4.1  核心电化学性能结论")[0]
     seq = [a.strip() if a else "FIG" + b for a, b in
            re.findall(r"<h2[^>]*>([^<]+)</h2>|<!--FIGURE:(\d+)-->", body)
            if a or b]
     c.ok(seq == ["FIG1", "3.2  倍率性能分析", "FIG2", "3.3  首圈库伦效率", "FIG3",
                  "3.4  平均电压曲线分析", "FIG4", "3.5  dQ/dV 曲线分析", "FIG5",
-                 "FIG6", "3.6  多组样品横向对比分析"],
+                 "3.6  多组样品横向对比分析"],
          "★ 第 3 章小节与图号顺序与协会第二版报告一致", str(seq))
     src = (SCAFFOLD / "render.py").read_text(encoding="utf-8")   # 唯一出处：脚手架
     for pre in ("对比_长循环_", "对比_首效VQ_", "对比_平均电压_", "对比_倍率_", "dQdV_"):
@@ -390,9 +438,7 @@ def main() -> int:
          "★ 样品名按 --label-a/-b 进上下文（报告封面/图例都用它）",
          str(ctx["variable"]))
     c.ok(bool(ctx.get("data_cutoff")), "数据截止时间写进上下文", str(ctx.get("data_cutoff")))
-    ts = (OUT / "任务说明.md").read_text(encoding="utf-8-sig")
-    c.ok("2026-10-01 02:00" not in ts and "数据截至" in ts,
-         "★ 任务说明里的日期被换成动态值（不再是写死的 10-01）")
+    # （原来这里断言包里的 任务说明.md 日期是动态的；随 Agent 壳已删除。）
     win = ctx["test_conditions"]["voltage_window"]
     c.ok(win and "3.31" not in win,
          "★ 电压窗口从数据现算（写死的 3.31 V 是别的实验的窗口，会张冠李戴）", str(win))
@@ -473,8 +519,16 @@ def main() -> int:
     if not html_p.exists():
         return c.report()
     html = html_p.read_text(encoding="utf-8")
-    c.ok(html.count("<figure>") == 6, f"★ 六张图全部内嵌（实得 {html.count('<figure>')}）")
-    c.ok(html.count("data:image/svg+xml;base64,") == 6, "六张图都是 base64 内嵌（不依赖外部文件）")
+    c.ok(html.count("<figure>") == 5,
+         f"★ 五张图全部内嵌（实得 {html.count('<figure>')}）")
+    c.ok(html.count("data:image/svg+xml;base64,") == 5, "五张图都是 base64 内嵌（不依赖外部文件）")
+    # ★ 产物里样式块也必须真的生效（模板对了，渲染仍可能把 CSS 漏在 body 里）
+    c.ok(html.count("<style>") == 1 and html.count("</style>") == 1,
+         "产物只有一对 <style>/</style>",
+         "[开=%d 闭=%d]" % (html.count("<style>"), html.count("</style>")))
+    _tail = html.split("</style>")[-1]
+    c.ok(":root{" not in _tail and "--paper:" not in _tail,
+         "★ CSS 没有漏进正文（漏了就是「未渲染」那种一片样式文字）")
     c.ok("充放电平均电压随循环的变化" in html,
          "★ 平均电压图的图注在报告里（这张图曾经整张消失）")
     left = [x for x in ("<!--BLOCK:", "<!--FIGURE:", "<!--TABLE:", "{{DOC_", "{{TOC_")
@@ -486,13 +540,12 @@ def main() -> int:
     # dQ/dV 逐圈图：圈号说明走图注，**不许**用图内说明框（说明框固定左上角，
     # 会压住 dQ/dV 的峰 —— 渲染出来一眼可见）
     import figures as _F
-    for nm in ("dQdV_STD.svg", "dQdV_1%Q④.svg"):
+    for nm in ("dQdV_STD_vs_1%Q④.svg",):
         svg = (OUT / "图" / nm).read_text(encoding="utf-8")
         c.ok(_F.C_NOTE_BG not in svg, f"★ {nm} 图内没有说明框（不会压住峰）")
-        c.ok("已画圈" in svg and "尚未到达的圈" in svg,
-             f"★ {nm} 把「已画/未到」的圈号写在图注里（画布下方，谁都挡不住）")
         c.ok("符号口径" in svg, f"{nm} 注明了正负峰的口径（还原为正）")
-
+        c.ok("STD" in svg and "1%Q④" in svg,
+             f"★ {nm} 是**同一张图里两条曲线**（对①的两颗并排对比）")
     print()
     print(BAR)
     print("⑥ 段落缺失必须显式告警（不能静默留空）")

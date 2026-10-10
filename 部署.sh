@@ -43,6 +43,7 @@ for a in "$@"; do
 done
 
 # ── 要部署的清单（显式列出，避免把 docs/ 之类也推上去） ──────────────────────
+keep=""
 RUNTIME_PY="probe.py figures.py report_pack.py report_build.py make_share.py
 collector.py console.py control.py neware_client.py reconcile.py validate.py
 export_review.py dump_raw.py"
@@ -170,6 +171,23 @@ scp -q $SHARE_TOOLS_PY "$BOX:$TOOLS/" || die "传到共享目录 报告工具/ �
 echo "  → 共享目录/报告工具/"
 scp -q -r "$SCAFFOLD_DIR/." "$BOX:$LAB/$SCAFFOLD_DIR/" || die "传脚手架失败"
 echo "  → ~/batterylab/$SCAFFOLD_DIR/"
+# ★ 2026-10-09：脚手架要**同步**，不是"只拷" —— 本地删掉的文件，盒子上也得消失。
+#   否则会出现"本地删了、盒子上还在"，而且报告打包时还会把旧文件一起拷进任务包
+#   （实测：任务说明.md 本地已删、盒子上仍在，还进了任务包）。
+scaffold_keep=$(ls -1 "$SCAFFOLD_DIR" | tr '
+' ' ')
+# ★ 2026-10-09：还要同步到**共享目录**那份脚手架 —— report_build 从共享目录跑时
+#   用的就是那一份（换通道脚本会先同步，但直接调 report_build 会绕过它）。
+#   实测：共享目录那份 render.py 是旧的（还留着第 6 个图位）→ 只渲染出 3 张图。
+ssh "$BOX" "mkdir -p '$SHARE/$SCAFFOLD_DIR' && cp -a '$LAB/$SCAFFOLD_DIR/.' '$SHARE/$SCAFFOLD_DIR/' && echo '  -> 共享目录/报告任务_脚手架/ 已同步'"
+
+ssh "$BOX" "cd '$LAB/$SCAFFOLD_DIR' || exit 0
+for f in *; do
+  case ' $scaffold_keep ' in
+    *\" \$f \"*) ;;
+    *) rm -rf \"\$f\"; echo \"  🧹 脚手架上删掉（本地已无）：\$f\";;
+  esac
+done"
 scp -q "$SCAFFOLD_DIR/$ENTRY" "$BOX:$SHARE/$ENTRY" || die "传入口脚本失败"
 echo "  → 共享目录/$ENTRY"
 

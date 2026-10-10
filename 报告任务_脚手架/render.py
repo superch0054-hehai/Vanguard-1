@@ -293,25 +293,34 @@ def render(ctx, labels):
                             ["保持率类", "容量类", "极化类"],
                             [["（圈数尚少，幅度区间无法统计）", "", ""]])
 
-    # ---- 图表位（图号与《协会第二版报告》一致）----
-    # 图 1 长循环 / 图 2 倍率 / 图 3 首圈库伦效率 / 图 4 平均电压 / 图 5、6 dQ/dV（每样品一张）
-    vs = "_vs_".join(labels)
+    # ---- 图表位（图号与《协会第二版报告》一致；**共 5 张**，图 6 已取消）----
+    # ★ 图号 ↔ 用哪一对：查契约里的 figures 字段（唯一出处 = report_pack.FIGURE_PAIRS）。
+    #   图1/3/4/5 = 对①（长循环）；图2 = 对②（倍率）。**不要在这里写死通道号**。
+    fg = ctx.get("figures") or {}
+    vs1 = fg.get("pair1") or "_vs_".join(labels)
+    vs2 = fg.get("pair2") or vs1
+    fmap = fg.get("map") or {1: 1, 2: 2, 3: 1, 4: 1, 5: 1}
+
+    def _vs(no: int) -> str:
+        # ★ JSON 里的对象键**一定是字符串**（{"1":1}），拿整数去查会查不到、
+        #   于是全部退回对① —— 实测：图 2 会去找 对比_倍率_10-1_vs_10-2.svg，
+        #   文件不存在 → "图 2 未生成"。两种都兜住。
+        pair = fmap.get(str(no), fmap.get(no, 1))
+        return vs1 if int(pair) == 1 else vs2
+
     a, b = (list(labels) + ["", ""])[:2]
     figs = {
-        1: figure_html(1, "对比_长循环_" + vs + ".svg",
-                       "长循环放电比容量与库伦效率对比（两样品叠加）"),
-        2: figure_html(2, "对比_倍率_" + vs + ".svg",
-                       "放电比容量随循环变化（本批数据尚未进入倍率阶梯段）"),
-        3: figure_html(3, "对比_首效VQ_" + vs + ".svg",
+        1: figure_html(1, "对比_长循环_" + _vs(1) + ".svg",
+                       "长循环放电比容量与库伦效率对比（实验样 vs 对比样）"),
+        2: figure_html(2, "对比_倍率_" + _vs(2) + ".svg",
+                       "放电比容量随循环变化（倍率阶梯段）"),
+        3: figure_html(3, "对比_首效VQ_" + _vs(3) + ".svg",
                        "首周充放电电压-比容量曲线（图例含各样品首次库伦效率）"),
-        4: figure_html(4, "对比_平均电压_" + vs + ".svg",
+        4: figure_html(4, "对比_平均电压_" + _vs(4) + ".svg",
                        "充放电平均电压随循环的变化（两者之差即电压滞后 ΔV）"),
-        5: figure_html(5, "dQdV_" + a + ".svg",
-                       a + " 的多周次 dQ/dV 叠放图谱（同图内：上为放电分支/钠嵌入，"
-                           "下为充电分支/钠脱出；按圈号配色）"),
-        6: figure_html(6, "dQdV_" + b + ".svg",
-                       b + " 的多周次 dQ/dV 叠放图谱（同图内：上为放电分支/钠嵌入，"
-                           "下为充电分支/钠脱出；按圈号配色）"),
+        5: figure_html(5, "dQdV_" + _vs(5) + ".svg",
+                       "dQ/dV 对比（实验样 vs 对比样，同图按样品配色；"
+                       "上为放电分支/钠嵌入，下为充电分支/钠脱出）"),
     }
 
     # ---- 替换：块位最后替换（避免 frag 里含同类注释被二次替换）----
@@ -337,8 +346,10 @@ def main():
     # 两套报告不互相覆盖：进行中 → SOH分析报告.html；正式数据集 → 加后缀
     # 产物名带上"本次选择"，一眼可辨是哪两颗的报告（不靠目录区分）
     sel = ctx.get("selection") or {}
-    tag = ("_%s_vs_%s" % (sel.get("short_a"), sel.get("short_b"))
-           if sel.get("short_a") and sel.get("short_b") else "")
+    # ★ 2026-10-09：产物名带**全部**通道（四通道报告）—— 身份放文件名，不靠目录
+    _s = [sel.get(k) for k in ("short_a", "short_b", "short_c", "short_d")]
+    _s = [x for x in _s if x]
+    tag = ("_" + "_vs_".join(_s)) if _s else ""
     if ctx.get("data_source") == "official":
         name = f"SOH分析报告{tag}-正式数据集.html"
     else:

@@ -161,26 +161,15 @@ def test_agent_entry(c: Checker) -> None:
     Agent 于是自己找 CSV 写了一份报告，还用错数据集（同通道的旧测试 247/244）。
     路由只能写进它一进门就会读的文件里。
     """
+    # ★ 2026-10-09 改：报告链路不再经过 Agent，所以共享目录**不再生成**入口页
+    #   （AGENTS.md / 00-先读我.md）。原来这段断言"入口页存在且指向任务说明.md"，
+    #   现在反过来断言"不再生成"，并确认给人和 Agent 的路由改由 README/datasets 承担。
     for fn in ("AGENTS.md", "00-先读我.md"):
-        p = SHARE / fn
-        c.ok(p.exists(), f"根入口 {fn} 生成了")
-    entry = (SHARE / "AGENTS.md").read_text(encoding="utf-8")
-    c.ok("报告任务/任务说明.md" in entry, "★ 入口指向了 报告任务/任务说明.md")
-    # ★ 2026-10-04 改：流程**只留一处**（任务说明.md），入口页只给一条命令 + 优先级声明。
-    #   原来入口页把流程抄了一遍，结果代码一改文档就落后（新入口在文档里出现 0 次）。
-    c.ok("bash 出报告.sh" in entry, "★ 入口给的是**一条命令**（出报告.sh）")
-    c.ok("唯一出处" in entry or "以它为准" in entry, "★ 入口声明了优先级：冲突时以任务说明为准")
-    c.ok("任务说明.md" in entry, "入口指向任务说明.md")
-    c.ok("不要" in entry and "另写" in entry, "★ 入口明确禁止自己另写报告文件")
-    c.ok("SOH分析报告_" in entry,
-         "入口写明了**两套**报告的落点")
-    # ★ 2026-10-06：水桶模型下没有 live 区，入口不再单列"进行中的测试号"；
-    #   改成断言入口写清了"数据在哪、怎么出报告"。
-    c.ok("channel=" in entry, "入口写清了数据集在哪（channel=/testid=/ 的桶）")
-    c.ok("旧测试" in entry, "入口提醒了 247/244 是旧测试")
+        c.ok(not (SHARE / fn).exists(),
+             f"★ 不再生成 Agent 入口页 {fn}（报告链路不经过 Agent）")
 
     idx = (SHARE / "datasets.md").read_text(encoding="utf-8")
-    c.ok("报告任务/任务说明.md" in idx, "★ 索引顶部也指向报告入口")
+    c.ok("换通道出报告.sh" in idx, "★ 索引顶部指向了报告入口（换通道出报告.sh）")
     c.ok("已结束的正式数据集" in idx, "★ 索引把正式数据集标成「已结束」")
     c.ok("已被 live/testid=" not in idx,
          "★ 索引里不再出现「已被 live 取代」（没有 live 区了）")

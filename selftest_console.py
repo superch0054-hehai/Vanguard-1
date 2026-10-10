@@ -17,10 +17,12 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
 DATA = Path("_console_test_data")
+SHARE = Path("_console_test_share")      # 假装是共享目录（里面放一份"已生成的报告"）
 BAR = "=" * 66
 
 
@@ -100,12 +102,32 @@ def make_fake_data() -> None:
     (bad / "progress.json").write_text("{ 这不是 JSON", encoding="utf-8")
 
 
+def make_fake_share() -> None:
+    """造一个假的共享目录，里面放一份"已经生成好的"四通道报告。"""
+    if SHARE.exists():
+        shutil.rmtree(SHARE)
+    task = SHARE / "报告任务"
+    task.mkdir(parents=True)
+    (task / "SOH分析报告_10-1_vs_10-2_vs_10-3_vs_10-4.html").write_text(
+        "<!doctype html><html><head><style>:root{--paper:#fff}</style></head>"
+        "<body><h1>报告内容标记</h1></body></html>", encoding="utf-8")
+
+
 def get(url: str) -> tuple[int, str]:
     try:
         with urllib.request.urlopen(url, timeout=10) as r:
             return r.status, r.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as e:
         return e.code, e.read().decode("utf-8", "replace")
+
+
+def get_full(url: str) -> tuple[int, dict, str]:
+    """连响应头一起拿 —— 判断「下载」靠的就是 Content-Disposition。"""
+    try:
+        with urllib.request.urlopen(url, timeout=10) as r:
+            return r.status, dict(r.headers), r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        return e.code, dict(e.headers), e.read().decode("utf-8", "replace")
 
 
 class Checker:
@@ -129,11 +151,13 @@ class Checker:
 
 def main() -> int:
     make_fake_data()
+    make_fake_share()
     port = free_port()
     base = f"http://127.0.0.1:{port}"
 
     proc = subprocess.Popen(
-        [sys.executable, "console.py", "--data-dir", str(DATA), "--port", str(port)],
+        [sys.executable, "console.py", "--data-dir", str(DATA),
+         "--share-dir", str(SHARE), "--port", str(port)],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     try:
         # 等它起来
@@ -290,6 +314,36 @@ def main() -> int:
                  "API 里正好 2 个数据集（坏行被跳过）")
         except json.JSONDecodeError:
             c.ok(False, "API 返回的是合法 JSON")
+
+        print()
+        print(BAR)
+        print("⑦ 报告投递：「打开报告」与「下载报告」拿到同一份")
+        print(BAR)
+        _rep = "/report/file?a=10-1&b=10-2&c=10-3&d=10-4"
+        code, hdrs, body = get_full(base + _rep)
+        c.ok(code == 200, "四个通道的链接返回 200", str(code))
+        c.ok("报告内容标记" in body, "发出来的确实是报告本体")
+        # ★ 路由必须把 c/d 一起转发：早先只转 a/b，服务端拼出的文件名少两段 → 404，
+        #   而这条链路此前**一个测试都没有**，所以坏了没人知道。
+        c.ok(code == 200 and "报告内容标记" in body,
+             "★ 路由把四个通道都转发给报告投递（只传两个就会 404）")
+        c.ok("attachment" not in (hdrs.get("Content-Disposition") or ""),
+             "★「打开报告」是直接看，不带 attachment 头")
+        code3, h3, body3 = get_full(base + _rep + "&dl=1")
+        cd = h3.get("Content-Disposition") or ""
+        c.ok(code3 == 200 and "attachment" in cd,
+             "★「下载报告」带 attachment 头（浏览器存文件，不是打开）", cd)
+        c.ok("SOH" in urllib.parse.unquote(cd),
+             "下载的文件名是报告名，而不是 file?...", cd)
+        c.ok(body3 == body, "下载与打开是同一份内容（同一个出处）")
+        code2, _h2, body2 = get_full(base + "/report/file?a=10-1&b=10-2")
+        c.ok(code2 == 200 and "报告内容标记" in body2,
+             "★ 参数不全时兜底发最新那份（不因少一个参数就 404）")
+        c.ok("还没有报告" in get(base + "/report/file?a=&b=")[1],
+             "一个参数都不给 → 明确说「还没有报告」")
+        _c4, _h4, home2 = get_full(base + "/")
+        c.ok("下载报告" in home2 and "打开报告" in home2,
+             "★ 页面上两个按钮都在（打开 = 看，下载 = 存）")
 
         print()
         print(BAR)

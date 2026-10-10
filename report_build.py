@@ -7,7 +7,7 @@
   2. 逐通道算指标（明细层口径，剔除截断末圈）
   3. 生成 6 张对比图（第一通道蓝、第二通道红）
   4. 构建数据契约（global_context + 28 个 block_data）
-  5. 组装任务包到共享目录（整目录替换，供 Agent 按任务说明执行）
+  5. 组装任务包到共享目录（整目录替换）
 
 用法：
   python3 report_build.py --ch-a 10-1 --ch-b 10-2
@@ -33,7 +33,7 @@ import report_pack as RP
 
 VERSION = "1.1"
 HERE = Path(__file__).resolve().parent
-# 静态脚手架（与通道无关，每次组装原样复制）：提示词/模板/render.py/任务说明
+# 静态脚手架（与通道无关，每次组装原样复制）：提示词/模板/render.py
 SCAFFOLD = HERE / "报告任务_脚手架"
 
 
@@ -67,10 +67,21 @@ def main() -> int:
     p.add_argument("--testid-a", type=int, default=None,
                    help="指定通道 A 用哪一个测试（默认取最新的那个 = 当前在跑的）")
     p.add_argument("--testid-b", type=int, default=None, help="同上，通道 B")
+    # ★ 2026-10-09：支持**两对** —— 对① = ch-a/ch-b（长循环），对② = ch-c/ch-d（倍率）。
+    #   哪张图用哪一对由 report_pack.FIGURE_PAIRS 决定（唯一出处），这里只管取数。
+    p.add_argument("--ch-c", default=None, help="对② 通道 C（如 10-3）")
+    p.add_argument("--ch-d", default=None, help="对② 通道 D（如 10-4）")
+    p.add_argument("--label-c", default=None)
+    p.add_argument("--label-d", default=None)
+    p.add_argument("--testid-c", type=int, default=None)
+    p.add_argument("--testid-d", type=int, default=None)
     p.add_argument("--data-dir", default="./data")
     p.add_argument("--source", choices=["auto", "live", "official"], default="auto",
                    help="数据来源：auto=live 优先；live=只用进行中的每日增量；"
                         "official=只用已结束的正式数据集（两套报告都出，各自注明来源）")
+    p.add_argument("--variable", default=None,
+                   help="本批实验的变量（进表 1 与 4.2 机制段）；不填则用 report_pack 的本批默认值（电解液添加剂 PBSF 1 wt%）")
+    p.add_argument("--dosage", default=None, help="变量用量，如 1 wt%")
     p.add_argument("--mass-mg", default="2",
                    help="活性物质质量 mg：一个值两通道共用，或逗号分隔各给各的（默认 2）")
     p.add_argument("--nominal-mah", type=float, default=None,
@@ -94,7 +105,7 @@ def main() -> int:
     p.add_argument("--out", default="/home/admin/jerry/batterylab-data/报告任务",
                    help="任务包输出目录（默认 Agent 可见的共享目录）")
     p.add_argument("--scaffold-dir", default=str(SCAFFOLD),
-                   help="静态脚手架目录（提示词/模板/render.py/任务说明）")
+                   help="静态脚手架目录（提示词/模板/render.py）")
     args = p.parse_args()
 
     data_dir = Path(args.data_dir)
@@ -110,10 +121,16 @@ def main() -> int:
     dqdv_cycles = [int(x) for x in str(args.dqdv_cycles).split(",") if x.strip()]
     cells: dict[str, dict] = {}
     labels: dict[str, str] = {}
-    for entry, label, want_tid in ((args.ch_a, args.label_a or args.ch_a, args.testid_a),
-                                   (args.ch_b, args.label_b or args.ch_b, args.testid_b)):
+    _slots = ((args.ch_a, args.label_a or args.ch_a, args.testid_a),
+              (args.ch_b, args.label_b or args.ch_b, args.testid_b),
+              (args.ch_c, args.label_c or args.ch_c, args.testid_c),
+              (args.ch_d, args.label_d or args.ch_d, args.testid_d))
+    for entry, label, want_tid in _slots:
+        if not entry:
+            continue
         key = normalize_channel(entry)
-        cell = RP.load_cell(data_dir, key, mass_parts[len(cells)], dqdv_cycles,
+        _mi = len(cells) if len(cells) < len(mass_parts) else len(mass_parts) - 1
+        cell = RP.load_cell(data_dir, key, mass_parts[_mi], dqdv_cycles,
                             args.source, testid=want_tid)
         if not cell or cell.get("error"):
             why = (cell.get("error")
@@ -133,7 +150,8 @@ def main() -> int:
 
     # ---- 2. 数据契约 ----
     generated = datetime.now().strftime("%Y-%m-%d %H:%M")
-    ctx = RP.build_global_context(labels, cells, mass_parts[0], generated)
+    ctx = RP.build_global_context(labels, cells, mass_parts[0], generated,
+                                variable_type=args.variable, dosage=args.dosage)
     # 产物名要能一眼看出"这是哪两颗的"（身份放文件名，不放目录 —— 见 AGENTS.md 七之四）
     _keys = list(cells)
     ctx["selection"] = {
@@ -142,6 +160,13 @@ def main() -> int:
         "short_b": "-".join(_keys[1].split("-")[-2:]),
         "label_a": labels[_keys[0]], "label_b": labels[_keys[1]],
     }
+    if len(_keys) >= 4:
+        ctx["selection"]["ch_c"] = _keys[2]
+        ctx["selection"]["ch_d"] = _keys[3]
+        ctx["selection"]["short_c"] = "-".join(_keys[2].split("-")[-2:])
+        ctx["selection"]["short_d"] = "-".join(_keys[3].split("-")[-2:])
+        ctx["selection"]["label_c"] = labels[_keys[2]]
+        ctx["selection"]["label_d"] = labels[_keys[3]]
     cutoff = max((c.get("progress_updated") or "" for c in cells.values()))
     ctx["data_cutoff"] = cutoff or generated
     # ---- 数据来源标注（两套报告都出：必须让读者一眼看出这份是哪套）----
@@ -182,43 +207,53 @@ def main() -> int:
             "dqdv_cycles_drawn": c["dqdv_cycles_drawn"],
             "dqdv_cycles_missing": c["dqdv_cycles_missing"],
         })
-    vs = "_vs_".join(labels.values()) if len(labels) == len(cells) else "_vs_".join(labels[k] for k in cells)
+    # ★ 图号 ↔ 用哪一对：**唯一出处**在契约里（report_pack.FIGURE_PAIRS）
+    #   图1/3/4/5 = 对①（长循环）；图2 = 对②（倍率）；图 6 已取消 —— 共 5 张。
+    fmap = ctx.get("figures") or {}
+    vs1 = fmap.get("pair1") or "_vs_".join(labels[k] for k in cells)
+    vs2 = fmap.get("pair2") or vs1
+    # ★ 出图要的是"带 label 的 cell"（fig_cells），不是裸 cell —— 别取错来源
+    _by_lab = {c["label"]: c for c in fig_cells}
+    _l1 = [labels[k] for k in (fmap.get("ch1") or list(cells)[:2]) if k in labels]
+    _l2 = [labels[k] for k in (fmap.get("ch2") or list(cells)[2:4]) if k in labels]
+    p1 = [_by_lab[x] for x in _l1 if x in _by_lab]
+    p2 = [_by_lab[x] for x in _l2 if x in _by_lab] or p1
     mass_flag = mass_parts[0] / 1000.0
     figs = {
-        "对比_长循环_" + vs: F.chart_long_cycle(f"{vs}　（长循环）", fig_cells,
-                                               mass_g=mass_flag),
-        "对比_首效VQ_" + vs: F.chart_vq(f"{vs}　（首效VQ）", fig_cells),
-        "对比_平均电压_" + vs: F.chart_avgv(f"{vs}　（平均电压）", fig_cells),
-        "对比_倍率_" + vs: F.chart_rate(f"{vs}　（倍率）", fig_cells,
-                                        mass_g=mass_flag),
+        "对比_长循环_" + vs1: F.chart_long_cycle(f"{vs1}　（长循环）", p1,
+                                                 mass_g=mass_flag),
+        "对比_倍率_" + vs2: F.chart_rate(f"{vs2}　（倍率）", p2, mass_g=mass_flag),
+        "对比_首效VQ_" + vs1: F.chart_vq(f"{vs1}　（首效VQ）", p1),
+        "对比_平均电压_" + vs1: F.chart_avgv(f"{vs1}　（平均电压）", p1),
     }
-    # 图注（画布下方，不会压曲线）：口径 + 剔除说明 + 质量暂定值
+    # 图注用**裸 cell**（dropped_cycles 在它上面；fig_cells 是给画图用的另一种形状）
     drop_txt = "、".join(f"{labels[k]} 第 {'、'.join(map(str, cells[k]['dropped_cycles']))} 圈"
-                        for k in cells if cells[k]["dropped_cycles"])
-    caps = [f"活性物质质量：{'、'.join(f'{labels[k]} {mass_parts[i]:g} mg' for i, k in enumerate(cells))}"
-            "（暂定值，待测试记录确认）"]
+                        for k in cells if cells[k].get("dropped_cycles"))
+    caps = ["活性物质质量：" + "、".join(
+                f"{labels[k]} {mass_parts[min(n, len(mass_parts) - 1)]:g} mg"
+                for n, k in enumerate(cells))
+            + "（暂定值，待测试记录确认）"]
     if drop_txt:
         caps.append(f"末圈未走完（进行中），已从图上剔除：{drop_txt}")
     for f in figs.values():
         f.set_caption(caps)
-    for cell in fig_cells:
-        # 图 5/6：一个样品一张，氧化(充电)与还原(放电)同图，按圈号配色
-        fig = F.chart_dqdv_sample(
-            f"{cell['label']}　（dQ/dV）", cell,
-            reduction_positive=(args.dqdv_sign == "dis"))
-        drawn = cell["dqdv_cycles_drawn"]
-        miss = cell["dqdv_cycles_missing"]
-        # 圈号说明放**图注**（画布下方）而不是图内说明框：说明框固定画在左上角，
-        # 而 dQ/dV 的峰就在左下/左上 —— 实测框会压住峰（渲染出来一眼可见）。
-        lines = ["已画圈：" + "、".join(f"第 {c} 圈" for c in drawn)] if drawn else []
-        if miss:
-            lines.append("⚠ 尚未到达的圈：" + "、".join(f"第 {c} 圈" for c in miss))
-        if args.dqdv_sign == "dis":
-            lines.append("符号口径：还原（嵌入/放电）为正峰")
-        # 这一张只带"质量暂定"那条通用图注（剔除末圈的说明对逐圈图没意义 ——
-        # 图上已经写明画了哪几圈）
-        fig.set_caption(lines + caps[:1])
-        figs[f"dQdV_{cell['label']}"] = fig
+    # 图 5：dQ/dV **每对一张**（对①的实验样与对比样同图、按样品配色）。
+    #   原来是"每样品一张"（图5、6 各一颗）—— 图 6 取消后改成一张装完那一对。
+    dq_cells = []
+    for cell in p1:
+        dm = cell.get("dqdv_multi") or {}
+        if not dm:
+            continue
+        cyc = sorted(dm)[0]
+        pts = (dm[cyc] or {}).get("dis") or []
+        if args.dqdv_sign == "dis":        # 口径：还原（嵌入/放电）为正峰
+            pts = [(v, -q) for v, q in pts]
+        if pts:
+            dq_cells.append({"label": cell["label"], "curves": {cyc: pts}})
+    if dq_cells:
+        f5 = F.chart_dqdv(f"{vs1}　（dQ/dV 对比）", dq_cells)
+        f5.set_caption(["符号口径：还原（嵌入/放电）为正峰"] + caps[:1])
+        figs[f"dQdV_{vs1}"] = f5
     for name, fig in figs.items():
         print(f"  🖼  {name}.svg")
 
@@ -291,18 +326,10 @@ def main() -> int:
         print(f"  ✍  合成正文 {n} 段" + (f"（跳过已有 {len(skipped)} 段）" if skipped else "")
               + "　→ 再跑 validate_paragraphs.py 过闸")
 
-    # ---- 任务说明里的数据截止时间换成动态的 ----
-    ts = out / "任务说明.md"
-    if ts.exists():
-        t = ts.read_text(encoding="utf-8-sig")
-        import re
-        t = re.sub(r"数据截至 \d{4}-\d{2}-\d{2} \d{2}:\d{2}",
-                   f"数据截至 {cutoff or generated}", t)
-        _atomic_write(ts, t)
 
     print(f"\n✅ 任务包已重建：{out}")
     print(f"   通道：{' vs '.join(labels[k] for k in cells)}｜数据截至 {ctx.get('data_cutoff')}")
-    print(f"   下一步：对 QwenPaw 说「读 报告任务/任务说明.md，按工作流执行」")
+    print(f"   下一步：cd {out} && bash 出报告.sh   （AI 直接由脚本调模型，不经 Agent）")
     return 0
 
 

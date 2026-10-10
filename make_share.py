@@ -158,12 +158,11 @@ def build_readme(recs: list[dict], generated: str) -> str:
     a("")
     a("## ★★ 要出分析报告（SOH 报告）—— 只走这一条路")
     a("")
-    a("读 `报告任务/任务说明.md`（流程唯一出处），在 `报告任务/` 里跑 `bash 出报告.sh` —— "
-      "程序填数据句、**AI 写 3.6/4.1/4.2/4.3/5.2 共 21 段**、校验、渲染，一条命令到底；")
-    a("报告产物只有 `报告任务/SOH分析报告.html`（进行中）与 "
-      "`报告任务-正式数据集/SOH分析报告-正式数据集.html`（已结束）—— 两套各自独立，不互相覆盖。")
+    a("跑 `bash 换通道出报告.sh <通道A> <通道B>` —— 程序填数据句、"
+      "**AI 写 3.6/4.1/4.2/4.3/5.2 共 21 段**、校验、渲染，一条命令到底；")
+    a("报告产物只有一份：`报告任务/SOH分析报告_<通道A>_vs_<通道B>.html`。")
     a("**不要自己读 CSV 另写报告文件** —— 数值口径、图号表号、章节结构都在那条链里。")
-    a("一页纸版见本目录的 `AGENTS.md` / `00-先读我.md`。")
+    a("数据与报告的落点见本页下面的目录结构。")
     a("")
     a("**关于设备**：数据由实验室算力盒子上常驻的采集程序从测试机取出并落盘。")
     a("**你没有测试机的访问权限，也不需要** —— 需要设备上的操作时，让人在本机执行，")
@@ -288,10 +287,9 @@ def build_readme(recs: list[dict], generated: str) -> str:
     a("## 二、目录结构")
     a("")
     a("```")
-    a("AGENTS.md / 00-先读我.md ← ★★ 先读这一页：要出报告走哪条路")
     a("README.md               ← 你正在看的这份（口径规则）")
     a("datasets.md             ← 数据集索引（已结束的正式数据集）")
-    a("报告任务/               ← ★ 报告工作区：任务说明.md + 提示词 + 数据包 + 渲染脚本")
+    a("报告任务/               ← ★ 报告的产物与工作目录（提示词/数据包/渲染脚本）")
     a("channel=<通道>/testid=<测试号>/  ← ★ 一个测试一个「桶」：detail.csv + steps.csv + progress.json")
     a("channel=<通道>/testid=<测试号>/")
     a("    ├── summary.md      ← ★ 该数据集的摘要（指标＋规模＋文件清单）")
@@ -423,77 +421,7 @@ def build_readme(recs: list[dict], generated: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def build_agent_entry(recs: list[dict], live_entries: list[dict], generated: str) -> str:
-    """共享目录**根**上的一页纸 —— 让 Agent 一进来就知道"要报告走哪条路"。
-
-    为什么必须有这一份：实测（2026-10-03）一句人话进去，Agent 既不知道
-    `报告任务/任务说明.md` 存在（整个共享目录里 grep 不到这两个词），
-    又被 `datasets.md` 引向了**旧测试**（同通道的 247/244），自己写了一份
-    `10-1_vs_10-2_对比分析报告.md`，结论与事实相反。路由不能指望用户话术，
-    要写进它一进门就会读的文件里。
-    """
-    L: list[str] = []
-    a = L.append
-    a("# 要生成分析报告？先读这一页")
-    a("")
-    a(f"> 生成时间 {generated}　|　BatteryLab 采集系统自动生成")
-    a("")
-    a("## 一、要出报告，只走这一条路")
-    a("")
-    a("1. 读 **`报告任务/任务说明.md`**（流程的**唯一出处**，冲突时以它为准）；")
-    a("2. 在 `报告任务/` 目录里跑**这一条命令**——它内部会做：程序段按最新数据重填 → "
-      "**AI 写 3.6/4.1/4.2/4.3/5.2 共 21 段判断正文** → 拆段过闸 → 全文校验 → 渲染：")
-    a("")
-    a("```")
-    a("bash 出报告.sh")
-    a("```")
-    a("")
-    a("3. 报告产物**只有这两个**：")
-    a("   - `报告任务/SOH分析报告_<通道A>_vs_<通道B>.html` —— **进行中**的每日增量（阶段性；文件名带本次选择）")
-    a("   - `报告任务/SOH分析报告_<A>_vs_<B>-正式数据集.html` —— 用**已结束**的正式数据集")
-    a("")
-    a("**不要**自己读 CSV 另写一份报告（例如 `某某分析报告.md`）：数值口径、图号表号、"
-      "章节结构全在上面那条链里，自己写的对不上数据包，还容易被下面的旧数据集带偏。")
-    a("")
-    a("### 如果主人**点名了两个通道**（例如「10-1 和 10-3」）")
-    a("")
-    a("可选通道：**10-1 / 10-2 / 10-3 / 10-6 / 10-7 / 10-8**（当前在跑的六颗）。")
-    a("跑这一条就行 —— 工具与数据都在本共享目录里，**不用等人帮忙**：")
-    a("")
-    a("```")
-    a("bash 换通道出报告.sh 10-1 10-3            # 进行中数据（每日增量）")
-    a("bash 换通道出报告.sh 10-1 10-3 official   # 已结束的正式数据集")
-    a("```")
-    a("")
-    a("它内部会：用这两个通道重建任务包 → 程序填数据句 → **AI 写 3.6/4.1/4.2/4.3/5.2** → "
-      "校验 → 渲染。约 3~5 分钟，产物仍是 `报告任务/SOH分析报告.html`。")
-    a("")
-    a("## 二、当前进行中的测试（live）")
-    a("")
-    a("| 通道 | 测试号 | 已拉行数 | 设备端总数 | 最近更新 |")
-    a("|---|---|---|---|---|")
-    if live_entries:
-        for e in live_entries:
-            a("| {} | {} | {} | {} | {} |".format(
-                e["channel"], e["testid"],
-                e["rows"] if e["rows"] is not None else "—",
-                e["total"] if e["total"] is not None else "—",
-                e["updated_at"] or "—"))
-    else:
-        a("| （当前没有正在跑的测试） | | | | |")
-    a("")
-    a("> ⚠️ 同一个通道下会有**多轮测试**（各自的 `testid=`）。"
-      "哪一轮是当前在跑的，看该轮的 `progress.json`：`finished: false` 就是还在跑。")
-    a("")
-    a("## 三、只有要自己看数据时，才读下面这些")
-    a("")
-    a("- `README.md` —— 全套口径规则（单位 ×1000、圈号、保持率基线、效率方向…）；")
-    a("- `datasets.md` —— 数据集索引（**已结束的正式数据集**，均为旧测试）；")
-    a("- `channel=<通道>/testid=<测试号>/summary.md` —— 某份正式数据集的摘要；")
-    a("- `<通道>/<测试号>/progress.json` —— 水位 + **这轮跑完没有**（`finished`）。")
-    a("")
-    return "\n".join(L) + "\n"
-
+# （原 build_agent_entry 已删：那是给 Agent 看的共享目录入口页。报告链路不再经过 Agent，这一页没有存在意义。）
 
 def build_index(recs: list[dict], generated: str, data_dir: Path,
                 live_entries: list[dict] | None = None) -> str:
@@ -503,7 +431,7 @@ def build_index(recs: list[dict], generated: str, data_dir: Path,
     a("")
     a(f"> 生成时间：{generated}")
     a("")
-    a("> ★ **要出报告**：读 `报告任务/任务说明.md` 并按里面的三条命令跑；"
+    a("> ★ **要出报告**：跑 `bash 换通道出报告.sh <通道A> <通道B>`；"
       "**一个测试一个「桶」**（`channel=/testid=/`）：`progress.json` 里的 `finished` 说明这轮跑完没有。")
     a("")
     if not recs:
@@ -675,7 +603,7 @@ def build_summary(r: dict, data_dir: Path, generated: str, live_entries: list[di
                       if e["channel"] == r.get("channel")), None)
     if live_same:
         L.append(f"> ⚠️ **这是旧测试**（同通道当前进行中的是 `live/testid={live_same}`）：不要把它当成当前那颗电芯，")
-        L.append("> 要出报告请走 `报告任务/任务说明.md`（见本目录上一级的 `AGENTS.md`）。")
+        L.append("> 要出报告请走 `换通道出报告.sh`（见共享目录根的 `AGENTS.md`）。")
         L.append("")
     a("")
     a("## 基本信息")
@@ -916,9 +844,8 @@ def main() -> int:
     (share_dir / "datasets.md").write_text(
         build_index(recs, generated, data_dir, live_entries), encoding="utf-8")
     # 根入口一页纸：写两个名字（AGENTS.md 是约定俗成的入口名，00- 开头保证排在目录最前）
-    entry = build_agent_entry(recs, live_entries, generated)
-    for fn in ("AGENTS.md", "00-先读我.md"):
-        (share_dir / fn).write_text(entry, encoding="utf-8")
+    # 不再生成共享目录根的 AGENTS.md / 00-先读我.md（那是给 Agent 的入口页，
+    # 报告链路不经过 Agent 了）。共享目录只剩下数据 + 报告工具 + 脚手架。
     # ★ 2026-10-06：不再生成 live/ 区。
     #   水桶模型下"进行中/已结束"由每个桶自己的 progress.json 表达，
     #   live/ 这个并行目录已经取消（原来它会**每次都被重建**，

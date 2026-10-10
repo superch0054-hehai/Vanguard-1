@@ -53,12 +53,9 @@ def load_cell(data_dir: Path, channel: str, mass_mg: float,
     mass_g = mass_mg / 1000.0
     # 先按来源筛掉不看的那些根，再在剩下的根里找 —— 否则会出现
     # "live 里明明有 264、却因为在 official 里找不到而误报没有"（2026-10-04 实测踩到）。
-    roots = [(data_dir / "live", "live"), (data_dir, "official")]
-    if source in ("live", "official"):
-        roots = [r for r in roots if r[1] == source]
     cands = []
     avail: list[int] = []
-    for root, kind in roots:
+    for root, root_kind in ((data_dir / "live", "live"), (data_dir, "official")):
         d = root / f"channel={channel}"
         if not d.is_dir():
             continue
@@ -70,7 +67,24 @@ def load_cell(data_dir: Path, channel: str, mass_mg: float,
         pick = testid if testid is not None else tids[-1]
         if pick not in tids:
             continue
-        cands.append((d / f"testid={pick}", kind, pick))
+        dd = d / f"testid={pick}"
+        # ★ 2026-10-09 修：合并成一个位置后，**"进行中 / 已结束"由桶自己的
+        #   progress.json 决定，不能靠"在哪个目录"来判断**。
+        #   上一版把 --source 的筛选加在"目录"上，于是 --source live 把真正的桶
+        #   整个排除了 → 报告报"找不到数据目录"（真机验证当场抓到）。
+        kind = root_kind
+        pj = dd / "progress.json"
+        if pj.exists():
+            try:
+                if "finished" in json.loads(pj.read_text(encoding="utf-8-sig")):
+                    kind = ("official" if json.loads(
+                        pj.read_text(encoding="utf-8-sig"))["finished"] else "live")
+            except (OSError, ValueError):
+                pass
+        cands.append((dd, kind, pick))
+    # 按来源筛的是**候选**（状态），不是目录
+    if source in ("live", "official"):
+        cands = [c for c in cands if c[1] == source]
     if testid is not None and not cands:
         return {"error": f"该通道没有 testid={testid}（可选：{sorted(set(avail))}）"}
     if not cands:
@@ -448,6 +462,27 @@ def _voltage_window(cells: dict[str, dict], labels: dict[str, str]) -> str | Non
 # 协会《钠离子电池电解液添加剂 Q④ 性能测试分析报告·第二版》里的体系与工步口径。
 # 只在与该报告同一体系（STD vs 1% Q④）时填入报告 —— 见 _is_std_q_pair。
 BASELINE_CYCLE = 4          # 保持率基线：第 4 圈（化成后首个 1C 循环）
+
+# ★ 2026-10-09：**本批实验的变量** —— 由用户给定，不再靠标签去猜。
+#   实验样 = 电解液里额外加了质量分数 1% 的 PBSF；对比样 = 未加（基线）。
+#   它决定表 1 的"变量"栏与 4.2 机制段（机制知识库按 variable.type 注入）。
+DEFAULT_VARIABLE = "电解液添加剂（PBSF，1 wt%）"
+DEFAULT_DOSAGE = "1 wt%"
+
+# ★ 图号 ↔ 用哪一对通道 —— **唯一出处**：出图（report_build）与渲染（render.py）都查它。
+#   图 6 已取消（用户 2026-10-09 决定）：报告共 5 张图。
+#   对① = 长循环（10-1 实验样 vs 10-2 对比样）；对② = 倍率（10-3 实验样 vs 10-4 对比样）。
+FIGURE_PAIRS = {1: 1, 2: 2, 3: 1, 4: 1, 5: 1}
+
+
+def figure_map(labels: dict[str, str], chs: list[str]) -> dict:
+    """把"哪张图用哪一对"落成契约字段。**不要在图里写死通道号** —— 改分配只改这里。"""
+    def vs(keys):
+        return "_vs_".join(labels.get(k, k) for k in keys)
+    p1, p2 = list(chs)[:2], list(chs)[2:4]
+    return {"pair1": vs(p1), "pair2": vs(p2) if p2 else vs(p1),
+            "map": dict(FIGURE_PAIRS),
+            "ch1": p1, "ch2": p2}
 SYSTEM_STD_Q = {
     "cell_type": "CR2032 扣式半电池（Na‖HC）",
     "chemistry": "钠离子电池（硬碳负极 / 醚类电解液）",
@@ -470,7 +505,7 @@ TEST_COND_STD_Q = {
 
 
 def build_global_context(labels: dict[str, str], cells: dict[str, dict],
-                         mass_mg: float, generated: str) -> dict:
+                         mass_mg: float, generated: str, variable_type: str | None = None, dosage: str | None = None) -> dict:
     chs = sorted(labels)
     std_q = _is_std_q_pair(labels)
     reach = [max((c["cycle_range"][1] for c in cells.values()
@@ -488,13 +523,20 @@ def build_global_context(labels: dict[str, str], cells: dict[str, dict],
             "separator": None, "current_collector": None,
             "electrolyte_control": None, "electrolyte_experimental": None, "ions": None,
         },
+        "figures": figure_map(labels, chs),
         "variable": {
-            "type": "电解液添加剂（含氟分子 Q④，1 wt%）" if std_q else None,
+            # 由 --variable 传进来（默认本批的 PBSF）。**不再靠标签猜** ——
+            # 以前是写死的 if std_q，换个实验就变成"数据不足"，而且从结果上看不出来。
+            "type": (variable_type or DEFAULT_VARIABLE) if (variable_type or not std_q)
+                    else "电解液添加剂（含氟分子 Q④，1 wt%）",
             "control_short": labels[chs[0]] if len(chs) > 1 else chs[0],
             "control_name": f"通道 {chs[0]}（{labels[chs[0]]}）" if len(chs) > 1 else chs[0],
             "experimental_short": labels[chs[1]] if len(chs) > 1 else chs[0],
             "experimental_name": f"通道 {chs[1]}（{labels[chs[1]]}）" if len(chs) > 1 else chs[0],
-            "experimental_dosage": "1 wt%" if std_q else None,
+            "experimental_dosage": dosage or DEFAULT_DOSAGE,
+            # 对②（倍率那一对）的名字；只有两颗时留空
+            "pair2_control_short": labels.get(chs[2], "") if len(chs) > 2 else "",
+            "pair2_experimental_short": labels.get(chs[3], "") if len(chs) > 3 else "",
         },
         "test_conditions": {
             "temperature": TEST_COND_STD_Q["temperature"] if std_q else None,
@@ -539,7 +581,7 @@ BLOCK_REFS = {
     "S33A": ("图 2", None), "S33B": (None, "表 5"),
     "S32A": ("图 3", None), "S32B": (None, "表 6"),
     "S32C": ("图 4", None), "S32D": (None, "表 7"),
-    "S34A": ("图 5 与图 6", None), "S34B": (None, "表 8"), "S34C": (None, None),
+    "S34A": ("图 5", None), "S34B": (None, "表 8"), "S34C": (None, None),
     "S35A": (None, "表 9"), "S35B": (None, "表 10"), "S35C": (None, None),
 }
 

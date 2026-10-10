@@ -27,6 +27,7 @@ import csv
 import html
 import io
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime
@@ -65,11 +66,17 @@ KEY_METRICS = [
 # ---------------------------------------------------------------------------
 
 def load_manifest(root: Path) -> list[dict]:
-    """读 manifest.jsonl。坏行跳过，不要让一行脏数据把整个界面搞崩。"""
+    """读 manifest.jsonl。坏行跳过，不要让一行脏数据把整个界面搞崩。
+
+    ★ 2026-10-09：**按 key 去重、最后一行算数**。
+    水桶模型下同一轮测试会被记多次（第一次加水记一笔、结束时再记一笔更新）；
+    不去重的话，数据集列表里会出现几十行重复（用户实测看到一大堆）。
+    """
     p = root / "manifest.jsonl"
     if not p.exists():
         return []
-    out: list[dict] = []
+    latest: dict[str, dict] = {}
+    order: list[str] = []
     for line in p.read_text(encoding="utf-8-sig", errors="replace").splitlines():
         line = line.strip()
         if not line:
@@ -79,8 +86,11 @@ def load_manifest(root: Path) -> list[dict]:
         except json.JSONDecodeError:
             continue
         if isinstance(rec, dict):
-            out.append(rec)
-    return out
+            k = rec.get("key") or f"#{len(order)}"
+            if k not in latest:
+                order.append(k)
+            latest[k] = rec
+    return [latest[k] for k in order]
 
 
 def load_status(root: Path) -> dict:
@@ -431,6 +441,7 @@ def render_home(root: Path, share_dir: Path | None, msg: str = "") -> bytes:
   ｜ 监听通道 {esc(st.get('watched_channels', '—'))} 个
 </div>
 
+{report_card(recs)}
 <h2>数据集（{len(recs)} 个）</h2>
 {table}
 
@@ -879,6 +890,14 @@ class Handler(BaseHTTPRequestHandler):
             self._export(q)
         elif path == "/dataset":
             self._show_dataset(q.get("channel", ""), q.get("testid", ""))
+        elif path == "/report/status":
+            self._json(report_status(self.data_dir, self.share_dir, int(q.get("since") or 0)))
+        elif path == "/report/file":
+            # ★ 四个通道都要转发 —— 早先这里只传 a/b，服务端拼出的文件名少两段，
+            #   于是链接明明带了 c/d 却报 404（查了半天才发现是路由把它们吃了）。
+            self._serve_report(q.get("a", ""), q.get("b", ""),
+                               q.get("c", ""), q.get("d", ""),
+                               dl=bool(q.get("dl")))
         else:
             self._send(page("没找到", "<h1>404</h1><p><a href='/'>回到首页</a></p>"), 404)
 
@@ -892,7 +911,52 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._send(render_dataset(self.data_dir, rec))
 
+    def _serve_report(self, a: str, b: str, c: str = "", d: str = "",
+                      dl: bool = False):
+        """把生成好的报告 HTML 发给浏览器。
+
+        dl=False → 直接在浏览器里看（「打开报告」）；dl=True → 存成文件（「下载报告」）。
+        """
+        if not self.share_dir or not a or not b:
+            self._send(page("没找到", "<h1>还没有报告</h1>"), 404)
+            return
+        _nm = "_vs_".join([x for x in (a, b, c, d) if x])
+        task = self.share_dir / "报告任务"
+        f = task / ("SOH分析报告_" + _nm + ".html")
+        # ★ 找不到就发**最新那份** —— 同一时刻只有一个任务、一份报告。
+        #   不要因为"调用方少传一个参数"就报 404（实测踩过：链接只带了前两颗）。
+        if not f.exists():
+            _cands = sorted(task.glob("SOH分析报告*.html"),
+                            key=lambda x: x.stat().st_mtime, reverse=True)
+            f = _cands[0] if _cands else None
+        if f is None or not f.exists():
+            self._send(page("没找到", "<h1>还没有生成过报告</h1>"), 404)
+            return
+        try:
+            data = f.read_bytes()
+        except OSError as exc:
+            self._send(page("读不了", f"<h1>{exc}</h1>"), 500)
+            return
+        if dl:
+            self._download(data, f.name, "text/html; charset=utf-8")
+        else:
+            self._send(data, 200, "text/html; charset=utf-8")
+
     def do_POST(self):
+        u0 = urlparse(self.path)
+        q0 = {}
+        if u0.query:
+            for kv in u0.query.split("&"):
+                if "=" in kv:
+                    k, v = kv.split("=", 1)
+                    q0[k] = unquote(v)
+        if u0.path == "/report/start":
+            ok, msg = report_start(self.data_dir, self.share_dir, q0.get("a", "").strip(),
+                                   q0.get("b", "").strip(),
+                                   q0.get("source", "auto").strip() or "auto",
+                                   q0.get("c", "").strip(), q0.get("d", "").strip())
+            self._json({"ok": ok, "msg": msg})
+            return
         if urlparse(self.path).path != "/refresh":
             self._send(page("没找到", "<h1>404</h1>"), 404)
             return
@@ -923,6 +987,299 @@ def run_make_share(data_dir: Path, share_dir: Path) -> tuple[bool, str]:
     except subprocess.TimeoutExpired:
         return False, "执行超时（300 秒）"
     return r.returncode == 0, (r.stdout or "") + (r.stderr or "")
+
+
+
+# ---------------------------------------------------------------------------
+# 首页上的「生成报告」卡片（按钮 + 进度 + 实时产出）
+# ★ 纯字符串拼接，不走 f-string —— 里面的 JS 有大量 {}，走 f-string 会被当占位符。
+# ---------------------------------------------------------------------------
+REPORT_CARD_TMPL = """
+<h2>生成分析报告</h2>
+<div style="border:1px solid #ddd;border-radius:8px;padding:14px;background:#fafafa">
+  <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+    <label>长循环·实验样 <select id="r_ce"><!--SEL_ce--></select></label>
+    <label>长循环·对比样 <select id="r_cc"><!--SEL_cc--></select></label>
+    <label>倍率·实验样 <select id="r_re"><!--SEL_re--></select></label>
+    <label>倍率·对比样 <select id="r_rc"><!--SEL_rc--></select></label>
+    <button id="rgo" onclick="startReport()">生成报告</button>
+  </div>
+  <div id="rmsg" style="color:#666;font-size:13px;margin-top:8px">四个通道按「实验样 / 对比样 × 长循环 / 倍率」对应，默认已填好。</div>
+  <div id="rstages" style="margin-top:10px"></div>
+  <pre id="rlog" style="margin-top:10px;min-height:60px;max-height:320px;overflow:auto;background:#1b1b1b;color:#ddd;padding:10px;font-size:12px;white-space:pre-wrap;border-radius:6px">点「生成报告」后，这里会实时显示程序的输出。</pre>
+  <div id="rlink" style="margin-top:8px;font-size:14px"></div>
+</div>
+<script>
+var NL = String.fromCharCode(10), STAGES = [], rSince = 0, rTimer = null, rT0 = 0, rQ = {};
+function rEsc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function rPaint(st){
+  var h = "";
+  (STAGES || []).forEach(function(lab, i){
+    var c = (i < st.stage) ? "#2e7d32" : (i === st.stage ? "#1565c0" : "#bbb");
+    h += "<span style='display:inline-block;padding:3px 9px;margin:2px;border-radius:11px;"
+       + "font-size:12px;color:#fff;background:" + c + "'>" + (i+1) + ". " + rEsc(lab) + "</span>";
+  });
+  document.getElementById("rstages").innerHTML = h;
+  var el = document.getElementById("rlog");
+  if (st.lines && st.lines.length){
+    st.lines.forEach(function(l){ el.textContent += l + NL; });
+    el.scrollTop = el.scrollHeight;
+  }
+  document.getElementById("rmsg").textContent = (st.state === "running")
+      ? ("进行中　已等 " + Math.round((Date.now() - rT0) / 1000) + " 秒")
+      : ("状态：" + st.state + (st.report ? "" : "（没有产出报告，看下面日志）"));
+}
+// 报告链接：四个通道都带上；「下载报告」多一个 &dl=1（服务端据此发 attachment 头）
+function rFileUrl(){
+  return "/report/file?a=" + encodeURIComponent(rQ.ce) + "&b=" + encodeURIComponent(rQ.cc)
+       + "&c=" + encodeURIComponent(rQ.re) + "&d=" + encodeURIComponent(rQ.rc);
+}
+function rShowLinks(){
+  var u = rFileUrl();
+  document.getElementById("rlink").innerHTML =
+    "<a href='" + u + "' target='_blank' style='font-weight:bold'>▶ 打开报告</a>"
+    + "&nbsp;&nbsp;<a href='" + u + "&amp;dl=1'>⬇ 下载报告</a>";
+}
+function rPoll(){
+  fetch("/report/status?since=" + rSince).then(function(r){ return r.json(); }).then(function(st){
+    rSince = st.n || rSince;
+    if (!STAGES.length) STAGES = st.stages || [];
+    rPaint(st);
+    if (st.state === "running"){ rTimer = setTimeout(rPoll, 1000); return; }
+    clearTimeout(rTimer);
+    if (st.report){
+      rShowLinks();
+    }
+  }).catch(function(e){
+    document.getElementById("rmsg").textContent = "查询状态失败：" + e;
+    rTimer = setTimeout(rPoll, 3000);
+  });
+}
+function rVal(id){ return document.getElementById(id).value; }
+function startReport(){
+  var m = document.getElementById("rmsg");
+  rQ = {ce: rVal("r_ce"), cc: rVal("r_cc"), re: rVal("r_re"), rc: rVal("r_rc")};
+  var all = [rQ.ce, rQ.cc, rQ.re, rQ.rc];
+  if (all.some(function(x){ return !x; })){ m.textContent = "四个通道都要选"; return; }
+  if (new Set(all).size !== 4){ m.textContent = "四个通道必须各不相同（现在有重复）"; return; }
+  m.textContent = "已发送请求…";
+  fetch("/report/start?a=" + encodeURIComponent(rQ.ce) + "&b=" + encodeURIComponent(rQ.cc)
+        + "&c=" + encodeURIComponent(rQ.re) + "&d=" + encodeURIComponent(rQ.rc),
+        {method:"POST"})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      m.textContent = d.msg;
+      if (!d.ok) return;
+      document.getElementById("rlog").textContent = "";
+      document.getElementById("rlink").innerHTML = "";
+      rSince = 0; rT0 = Date.now(); STAGES = []; rPoll();
+    })
+    .catch(function(e){ m.textContent = "起不来：" + e; });
+}
+// ★ 2026-10-09：**页面加载时自动恢复**正在跑（或刚跑完）的任务。
+//   原来状态只存在 JS 内存里 —— 离开页面去看别的数据再回来，实时显示就"变回去了"。
+//   日志文件是从头记的，所以 since=0 就能把整段补回来。
+(function(){
+  fetch("/report/status?since=0").then(function(r){ return r.json(); }).then(function(st){
+    if (!st || (!st.lines || !st.lines.length)) return;
+    STAGES = st.stages || [];
+    rSince = st.n || 0;
+    rQ = {ce: st.ch_a || "", cc: st.ch_b || "", re: st.ch_c || "", rc: st.ch_d || ""};
+    rT0 = st.started_at ? Date.parse(String(st.started_at).replace(" ", "T")) : Date.now();
+    document.getElementById("rlog").textContent = "";
+    rPaint(st);
+    if (st.state === "running"){ rTimer = setTimeout(rPoll, 1000); }
+    else if (st.report){
+      rShowLinks();
+    }
+  }).catch(function(){});
+})();
+
+</script>
+"""
+
+
+# 每个角色下拉的默认通道（对① = 长循环：10-1 实验 / 10-2 对比；对② = 倍率：10-3 实验 / 10-4 对比）
+ROLE_DEFAULTS = {
+    "ce": "10-1", "cc": "10-2", "re": "10-3", "rc": "10-4",
+}
+
+
+def report_card(recs: list[dict]) -> str:
+    """首页的生成报告卡片：四个下拉（角色固定），默认已填好对①/对②。"""
+    chans = []
+    for r in recs:
+        c = short_channel(str(r.get("channel") or ""))
+        if c and c not in chans:
+            chans.append(c)
+    chans.sort()
+    html = REPORT_CARD_TMPL
+    for role, want in ROLE_DEFAULTS.items():
+        opts = "".join(
+            f"<option value='{esc(c)}'{' selected' if c == want else ''}>{esc(c)}</option>"
+            for c in chans)
+        html = html.replace(f"<!--SEL_{role}-->", opts)
+    return html
+
+
+def short_channel(key: str) -> str:
+    """27-188-10-1 → 10-1（报告脚本与产物名都用短名）。"""
+    parts = str(key).split("-")
+    return "-".join(parts[2:]) if len(parts) == 4 else str(key)
+
+
+# ---------------------------------------------------------------------------
+# 生成报告：起一个后台任务 + 跟读它的日志（网页上点按钮用）
+#
+# ★ 这里**只起进程、只读日志**，报告链路本身一个字不改。
+#   进度靠日志里的阶段标记点亮 —— 那些标记是 换通道出报告.sh / 出报告.sh
+#   自己打印的，所以进度显示和报告逻辑天然同步，不会"改了一边忘另一边"。
+# ---------------------------------------------------------------------------
+# ★ 这两个文件**不能放在 报告任务/ 里面** —— 报告程序第一步就是 rmtree 重建那个目录，
+#   会把它们清掉（实测：任务在跑、日志和状态却查不到）。放数据目录外面的 logs/。
+REPORT_TASK_DIR = "报告任务"
+REPORT_LOG_NAME = "报告生成.log"
+REPORT_STATE_NAME = "报告生成.json"
+
+REPORT_STAGES = [
+    ("── ① 重建任务包", "重建任务包"),
+    ("── ① 程序段按最新数据重填", "按最新数据重填程序段"),
+    ("── ② AI 撰写判断类章节", "AI 写 21 段判断正文"),
+    ("── ③④ 校验", "校验（不合格自动重写）"),
+    ("── ⑤ 渲染", "渲染 HTML"),
+    ("── ③ 验收闸门", "验收闸门"),
+]
+
+
+def report_paths(data_dir: Path) -> tuple[Path, Path]:
+    logs = data_dir.parent / "logs"
+    return logs / REPORT_LOG_NAME, logs / REPORT_STATE_NAME
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except (OSError, ProcessLookupError):
+        return False
+
+
+def report_state(data_dir: Path) -> dict:
+    """读任务状态。进程已经没了、状态还写着 running → 判为已结束。"""
+    _, state_p = report_paths(data_dir)
+    if not state_p.exists():
+        return {"state": "idle"}
+    try:
+        st = json.loads(state_p.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return {"state": "idle"}
+    if st.get("state") == "running":
+        # ★ 优先看日志里的收尾标记（不依赖 pid —— pid 可能是僵尸，永远"活着"）
+        _lp, _ = report_paths(data_dir)
+        _tail = ""
+        if _lp.exists():
+            try:
+                _tail = "".join(_lp.read_text(encoding="utf-8", errors="replace").splitlines(True)[-20:])
+            except OSError:
+                _tail = ""
+        if "[DONE] rc=" in _tail:
+            _rc = _tail.rsplit("[DONE] rc=", 1)[1].strip().split()[0]
+            st["state"] = "done" if _rc == "0" else "failed"
+            st["finished"] = True
+            st["rc"] = _rc
+        elif not _pid_alive(int(st.get("pid") or 0)):
+            st["state"] = "done"      # 进程没了 → 就当结束（兜底，不看 rc）
+            st["finished"] = True
+        return st
+    if st.get("state") == "running" and not _pid_alive(int(st.get("pid") or 0)):
+        st["state"] = "done"
+        st["finished"] = True
+    return st
+
+
+def report_start(data_dir: Path, share_dir: Path | None, ch_a: str, ch_b: str,
+                 source: str = "auto", ch_c: str = "", ch_d: str = "") -> tuple[bool, str]:
+    """起一次「生成报告」。★ **一次只准一个** —— 它们共用同一个输出目录。"""
+    if not share_dir:
+        return False, "没有配置共享目录（--share-dir），生成报告需要它。"
+    script = share_dir / "换通道出报告.sh"
+    if not script.exists():
+        return False, f"找不到 {script}"
+    st = report_state(data_dir)
+    if st.get("state") == "running":
+        return False, (f"已经有一个报告任务在跑（{st.get('ch_a')} vs {st.get('ch_b')}，"
+                       f"开始于 {st.get('started_at')}）—— 等它跑完再点。")
+    log_p, state_p = report_paths(data_dir)
+    log_p.parent.mkdir(parents=True, exist_ok=True)
+    # ★ PYTHONUNBUFFERED：不缓冲，否则日志会憋到最后一次性冒出来，进度就白做了
+    env = dict(os.environ, PYTHONUNBUFFERED="1")
+    # 对②（倍率那对）用环境变量传下去，不动位置参数
+    if ch_c:
+        env["CH_C"] = ch_c
+    if ch_d:
+        env["CH_D"] = ch_d
+    # ★ 默认图例名 = 角色名（用户 2026-10-09 拍板）。两对必须不同，否则 vs 名撞车
+    env.setdefault("LABEL_A", "长循环实验样")
+    env.setdefault("LABEL_B", "长循环对比样")
+    env.setdefault("LABEL_C", "倍率实验样")
+    env.setdefault("LABEL_D", "倍率对比样")
+    with open(log_p, "w", encoding="utf-8") as fh:
+        try:
+            # ★ 2026-10-09：用一层 shell 包住 —— 跑完把**收尾标记**写进日志。
+            #   为什么不用 pid 判断：父进程不回收子进程，子进程会变僵尸，
+            #   而 os.kill(pid,0) 对僵尸**返回成功** → 状态永远卡在 running
+            #   （实测：报告早跑完了、界面却一直"进行中"、还不让点第二次）。
+            cmd = '"$1" "$2" "$3" "$4" ; rc=$? ; printf "\n[DONE] rc=%s\n" "$rc" >> "$5"'
+            proc = subprocess.Popen(["bash", "-c", cmd, "run", str(script),
+                                    ch_a, ch_b, source, str(log_p)],
+                                    cwd=str(share_dir), stdout=fh,
+                                    stderr=subprocess.STDOUT, env=env,
+                                    start_new_session=True)
+        except OSError as exc:
+            return False, f"起不来：{exc}"
+    state_p.write_text(json.dumps({
+        "state": "running", "pid": proc.pid, "ch_a": ch_a, "ch_b": ch_b,
+        "ch_c": ch_c, "ch_d": ch_d,   # 对②（倍率那对）；报告升级成两对后就会用上
+        "source": source, "started_at": datetime.now().isoformat(timespec="seconds"),
+    }, ensure_ascii=False, indent=1), encoding="utf-8")
+    return True, f"已开始：{ch_a} vs {ch_b}"
+
+
+def report_status(data_dir: Path, share_dir: Path | None, since: int = 0) -> dict:
+    """状态 + 当前阶段 + 日志**新增**的行（网页每秒拉一次，不重复传旧行）。"""
+    st = report_state(data_dir)
+    lines: list[str] = []
+    stage = -1
+    task = None
+    if True:
+        log_p, _ = report_paths(data_dir)
+        if log_p.exists():
+            try:
+                all_lines = log_p.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
+                all_lines = []
+            lines = all_lines[max(0, int(since)):]
+            text = chr(10).join(all_lines)
+            for i, (marker, _lab) in enumerate(REPORT_STAGES):
+                if marker in text:
+                    stage = i
+    st["stage"] = stage
+    st["stages"] = [lab for _m, lab in REPORT_STAGES]
+    st["lines"] = lines
+    st["n"] = int(since) + len(lines)
+    if share_dir and st.get("state") in ("done", "failed"):
+        a, b = st.get("ch_a"), st.get("ch_b")
+        _nm = "_vs_".join([x for x in (a, b, st.get("ch_c"), st.get("ch_d")) if x])
+        _p = share_dir / REPORT_TASK_DIR / ("SOH分析报告_" + _nm + ".html")
+        # 与 _serve_report 的兜底保持一致：名字对不上就认最新那份，
+        # 否则"报告明明出好了、按钮却不出来"（两边规则不一致就会这样）。
+        if not _p.exists():
+            _c = sorted((share_dir / REPORT_TASK_DIR).glob("SOH分析报告*.html"),
+                        key=lambda x: x.stat().st_mtime, reverse=True)
+            _p = _c[0] if _c else _p
+        st["report"] = _p.exists()
+    return st
+
 
 
 # ---------------------------------------------------------------------------

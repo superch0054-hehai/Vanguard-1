@@ -73,11 +73,15 @@ start_console() {
     echo "启动网页控制台…"
     echo "  访问地址  : http://$(hostname -I 2>/dev/null | awk '{print $1}'):$CONSOLE_PORT"
     cd "$DIR"
+    # ★ 2026-10-09 修：默认原来是 $DIR/../batterylab-data = /home/admin/batterylab-data，
+    #   那是**另一个 9/29 之后就没动过的旧目录**；真正的共享目录是
+    #   /home/admin/jerry/batterylab-data。控制台指错地方 → "刷新共享数据"一直在往
+    #   旧目录写、生成报告也找不到入口脚本（当天实测抓到）。
     setsid nohup "$PY" console.py \
         --data-dir "$DATADIR" \
         --host "$CONSOLE_HOST" \
         --port "$CONSOLE_PORT" \
-        --share-dir "${SHARE_DIR:-$DIR/../batterylab-data}" \
+        --share-dir "${SHARE_DIR:-/home/admin/jerry/batterylab-data}" \
         > "$CONSOLE_LOG" 2>&1 < /dev/null &
     echo $! > "$CONSOLE_PIDFILE"
     sleep 3
