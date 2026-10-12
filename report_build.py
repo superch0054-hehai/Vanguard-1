@@ -202,9 +202,11 @@ def main() -> int:
     # ---- 3. 六张图（模板的 FIGURE:1..6）----
     # 图 1 长循环 / 图 2 首效VQ / 图 3 平均电压 / 图 4 倍率 / 图 5、6 dQ/dV（每样品一张）
     fig_cells = []
+    # ★ 2026-10-12：倍率换算用**标称容量**（300 mAh/g × 活性物质质量）——
+    #   给了它，图 2 的档位才按 C 倍率标注（与报告 2.3 的口径一致）；不给只能标 mA。
+    nominal = args.nominal_mah or (ctx.get("statistics") or {}).get("nominal_mah")
     for key in cells:
         c = cells[key]
-        nominal = args.nominal_mah
         fig_cells.append({
             "label": labels[key], "cs": c["cs_plot"],
             "rates": F.rates_from_cs(c["cs_plot"], nominal),
@@ -229,7 +231,8 @@ def main() -> int:
         "对比_长循环_" + vs1: F.chart_long_cycle(f"{vs1}　（长循环）", p1,
                                                  mass_g=mass_flag),
         "对比_倍率_" + vs2: F.chart_rate(f"{vs2}　（倍率）", p2, mass_g=mass_flag),
-        "对比_首效VQ_" + vs1: F.chart_vq(f"{vs1}　（首效VQ）", p1),
+        "对比_首效VQ_" + vs1: F.chart_vq(f"{vs1}　（首效VQ）", p1,
+                                             mass_g=mass_flag),
         "对比_平均电压_" + vs1: F.chart_avgv(f"{vs1}　（平均电压）", p1),
     }
     # 图注用**裸 cell**（dropped_cycles 在它上面；fig_cells 是给画图用的另一种形状）
@@ -243,30 +246,30 @@ def main() -> int:
         caps.append(f"末圈未走完（进行中），已从图上剔除：{drop_txt}")
     for f in figs.values():
         f.set_caption(caps)
-    # 图 5：dQ/dV **每对一张**（对①的实验样与对比样同图、按样品配色）。
-    #   原来是"每样品一张"（图5、6 各一颗）—— 图 6 取消后改成一张装完那一对。
-    dq_cells = []
-    for cell in p1:
+    # 图 5、6：dQ/dV **每样品一张**（★ 2026-10-12 用户指定）——
+    #   同一张里氧化(充电)与还原(放电)都画，按圈号**红/蓝渐变色阶**区分圈次；
+    #   只画数据里真有的圈（第 200 圈没到就画到第 100 圈为止）。
+    for _i, cell in enumerate(p1[:2], start=5):
         dm = cell.get("dqdv_multi") or {}
         if not dm:
             continue
-        cyc = sorted(dm)[0]
-        pts = (dm[cyc] or {}).get("dis") or []
-        if args.dqdv_sign == "dis":        # 口径：还原（嵌入/放电）为正峰
-            pts = [(v, -q) for v, q in pts]
-        if pts:
-            dq_cells.append({"label": cell["label"], "curves": {cyc: pts}})
-    if dq_cells:
-        f5 = F.chart_dqdv(f"{vs1}　（dQ/dV 对比）", dq_cells)
-        f5.set_caption(["符号口径：还原（嵌入/放电）为正峰"] + caps[:1])
-        figs[f"dQdV_{vs1}"] = f5
+        f = F.chart_dqdv_sample(f"{cell['label']}　（dQ/dV 逐圈）",
+                                {"label": cell["label"], "dqdv_multi": dm},
+                                reduction_positive=(args.dqdv_sign == "dis"),
+                                idx=_i - 5)
+        f.set_caption([f"符号口径：还原（嵌入/放电）为正峰；已画圈 "
+                       + "、".join(f"第 {c} 圈" for c in sorted(dm))] + caps[:1])
+        figs[f"dQdV_{cell['label']}"] = f
     # ★ 2026-10-11：图行说人话 —— 报"第几张图·画的是什么"，不报文件名
     _FIG_ZH = (("对比_长循环", "长循环性能对比"), ("对比_倍率", "倍率性能对比"),
-               ("对比_首效VQ", "首圈效率与电压-容量曲线"),
-               ("对比_平均电压", "平均电压与电压滞后"), ("dQdV", "dQ/dV 峰特征"))
+               ("对比_首效VQ", "首圈效率与比容量曲线"),
+               ("对比_平均电压", "平均电压与电压滞后"))
     _nf = len(figs)
     for _i, (name, fig) in enumerate(figs.items(), 1):
-        _zh = next((z for pre, z in _FIG_ZH if name.startswith(pre)), name)
+        _zh = next((z for pre, z in _FIG_ZH if name.startswith(pre)), None)
+        if _zh is None and name.startswith("dQdV_"):
+            _zh = f"dQ/dV 逐圈图谱 · {name.split('_', 1)[1]}"   # 每样品一张
+        _zh = _zh or name
         print(f"  ✓ 图 {_i}/{_nf} · {_zh}")
 
     # ---- 4. 组装任务包（整目录替换；但 Agent 已写的段落默认保住）----

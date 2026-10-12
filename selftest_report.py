@@ -31,8 +31,9 @@ WANT_FIGS = [
     "对比_首效VQ_STD_vs_1%Q④.svg",
     "对比_平均电压_STD_vs_1%Q④.svg",
     "对比_倍率_STD_vs_1%Q④.svg",
-    # ★ 2026-10-09：dQ/dV 从「每样品一张」改成「每对一张」（图 6 取消）
-    "dQdV_STD_vs_1%Q④.svg",
+    # ★ 2026-10-12：dQ/dV 又改回「每样品一张」（图 5、6）—— 图 6 回归，共 6 张
+    "dQdV_STD.svg",
+    "dQdV_1%Q④.svg",
 ]
 BLOCKS = ("S11", "S12", "S31A", "S31B", "S31C", "S32A", "S32B", "S32C", "S32D",
           "S33A", "S33B", "S34A", "S34B", "S34C", "S35A", "S35B", "S35C",
@@ -259,6 +260,32 @@ def test_placeholder_gate(c: Checker) -> None:
     c.ok(_val and "|| exit" not in _val,
          "★ 内层校验失败时**不中断**（判定权归外层闸门：中断会让成品根本不渲染）",
          _val.strip())
+
+
+def test_compose_missing_rate_group(c: Checker) -> None:
+    """末档少一圈（一颗样品的 keep/recover 为 None）时，3.2/4.1.2 模板不许崩。
+
+    真机踩过：`{None:.1f}` 当场 TypeError，整条流水线在"建包"就断了 ——
+    本地假数据的末档恰好都跑齐，所以原来的自检抓不到。
+    """
+    sys.path.insert(0, str(SCAFFOLD))
+    import compose_paragraphs as CP
+    g = {"variable": {"control_short": "实验样", "experimental_short": "对比样"},
+         "test_conditions": {"rate_program": "0.2C→5C→0.2C，每档 6 圈、共 13 档 78 圈"}}
+    d = {"rate_stats": {"pairs": ["实验样", "对比样"],
+                        "steps": [{"label": "0.2C", "a": 271.85, "b": 278.74, "diff": -6.89},
+                                  {"label": "5C", "a": 205.90, "b": 210.90, "diff": -5.0}],
+                        "retention": {"hi_label": "5C", "keep_pct": [75.7, 75.7],
+                                      "recover_pct": [97.2, None]}},
+         "figure_ref": "图 2", "table_ref": "表 4"}
+    for bid, fn in (("S33A", CP.s33a), ("S41B", CP.s41b)):
+        try:
+            txt = fn(CP.Ctx(d, g))
+            c.ok("None" not in txt, f"★ {bid}：缺数时不崩、也不印字面 None", txt[:90])
+            if bid == "S33A":      # 这一段的恢复率确实缺一颗 → 必须如实写"未提供"
+                c.ok("未提供" in txt, "★ S33A：恢复率缺数写成「（该项数据未提供）」", txt[:90])
+        except Exception as exc:      # noqa: BLE001
+            c.ok(False, f"★ {bid}：缺数时不许抛异常", f"{type(exc).__name__}: {exc}")
 
 
 def test_compose(c: Checker) -> None:
@@ -497,8 +524,8 @@ def main() -> int:
              f"图存在且非空：{name}", f"{p.stat().st_size if p.exists() else '缺失'} 字节")
     tmpl = (SCAFFOLD / "报告渲染模板.html").read_text(encoding="utf-8")
     slots = sorted(set(re.findall(r"<!--FIGURE:(\d+)-->", tmpl)), key=int)
-    c.ok(slots == ["1", "2", "3", "4", "5"],
-         "★ 模板有 FIGURE:1~5 五个图位（图 6 已取消）", str(slots))
+    c.ok(slots == ["1", "2", "3", "4", "5", "6"],
+         "★ 模板有 FIGURE:1~6 六个图位（图 5/6 = 每样品一张 dQ/dV）", str(slots))
     tslots = sorted(set(re.findall(r"<!--TABLE:(\d+)-->", tmpl)), key=int)
     c.ok(tslots == [str(i) for i in range(1, 10)],
          "★ 模板表槽位 = 1~9（原表 3 已删、顺延补号无缺口，B4）", str(tslots))
@@ -520,7 +547,7 @@ def main() -> int:
            if a or b]
     c.ok(seq == ["FIG1", "3.2  倍率性能分析", "FIG2", "3.3  首圈库伦效率", "FIG3",
                  "3.4  平均电压曲线分析", "FIG4", "3.5  dQ/dV 曲线分析", "FIG5",
-                 "3.6  多组样品横向对比分析"],
+                 "FIG6", "3.6  多组样品横向对比分析"],
          "★ 第 3 章小节与图号顺序与协会第二版报告一致", str(seq))
     src = (SCAFFOLD / "render.py").read_text(encoding="utf-8")   # 唯一出处：脚手架
     for pre in ("对比_长循环_", "对比_首效VQ_", "对比_平均电压_", "对比_倍率_", "dQdV_"):
@@ -618,6 +645,7 @@ def main() -> int:
          f"只剩 {len(kept)} 段")
 
     test_compose(c)
+    test_compose_missing_rate_group(c)
     test_two_report_sets(c)
 
     print()
@@ -632,9 +660,9 @@ def main() -> int:
     if not html_p.exists():
         return c.report()
     html = html_p.read_text(encoding="utf-8")
-    c.ok(html.count("<figure>") == 5,
-         f"★ 五张图全部内嵌（实得 {html.count('<figure>')}）")
-    c.ok(html.count("data:image/svg+xml;base64,") == 5, "五张图都是 base64 内嵌（不依赖外部文件）")
+    c.ok(html.count("<figure>") == 6,
+         f"★ 六张图全部内嵌（实得 {html.count('<figure>')}）")
+    c.ok(html.count("data:image/svg+xml;base64,") == 6, "六张图都是 base64 内嵌（不依赖外部文件）")
     # ★ 产物里样式块也必须真的生效（模板对了，渲染仍可能把 CSS 漏在 body 里）
     c.ok(html.count("<style>") == 1 and html.count("</style>") == 1,
          "产物只有一对 <style>/</style>",
@@ -669,6 +697,20 @@ def main() -> int:
          "★ 正文不再出现字面 None / 裸 **（B9/B8）")
     c.ok("28 ℃" in html and "0.01~2.0 V" in html,
          "★ 2.2 的设定条件进了正文（B1）")
+    # ---- 2026-10-12 用户第二轮五处修改的口径 ----
+    c.ok("各倍率档位放电比容量统计（每档最后一圈）" in html
+         and "实验样品 / (mAh·g⁻¹)" in html and "对比样品 / (mAh·g⁻¹)" in html,
+         "★ 倍率表：每档最后一圈 + 实验样/对比样/差值三列（用户 2026-10-12）")
+    _s3 = (OUT / "图" / WANT_FIGS[1]).read_text(encoding="utf-8")   # [1] = 首效VQ 那张
+    c.ok("比容量 (mAh" in _s3 and ">容量 (mAh)<" not in _s3,
+         "★ 图 3 横坐标 = 比容量（不是绝对容量）")
+    # 添加剂名钉在**代码**上（假数据本身就叫 1%Q④，不能拿渲染结果当判据）
+    _r = (SCAFFOLD / "render.py").read_text(encoding="utf-8")
+    c.ok("1%Q④-1C" not in _r and "1%PBSF-1C" in _r,
+         "★ 2.4 的样品编号写 PBSF（不是 Q④）")
+    _rp = (HERE / "report_pack.py").read_text(encoding="utf-8")
+    c.ok('= "Q④ 添加剂体系' not in _rp,
+         "★ 4.3/5.2 收尾段不再写死 Q④（跟着本批变量走）")
     # B9 的**两个分支**单独钉住（假包走的是"体系齐全"分支，收敛分支在 html 里看不到）：
     sys.path.insert(0, str(SCAFFOLD))
     import render as _R
@@ -711,12 +753,19 @@ def main() -> int:
     # dQ/dV 逐圈图：圈号说明走图注，**不许**用图内说明框（说明框固定左上角，
     # 会压住 dQ/dV 的峰 —— 渲染出来一眼可见）
     import figures as _F
-    for nm in ("dQdV_STD_vs_1%Q④.svg",):
+    # ★ 2026-10-12：dQ/dV 改成"每样品一张"（图 5/6）—— 每张只放一个样品、多圈渐变
+    for nm, lab in (("dQdV_STD.svg", "STD"), ("dQdV_1%Q④.svg", "1%Q④")):
         svg = (OUT / "图" / nm).read_text(encoding="utf-8")
         c.ok(_F.C_NOTE_BG not in svg, f"★ {nm} 图内没有说明框（不会压住峰）")
         c.ok("符号口径" in svg, f"{nm} 注明了正负峰的口径（还原为正）")
-        c.ok("STD" in svg and "1%Q④" in svg,
-             f"★ {nm} 是**同一张图里两条曲线**（对①的两颗并排对比）")
+        c.ok(lab in svg, f"★ {nm} 只放**这一个样品**（{lab}）")
+        # 只看**图例**（"<样品名> 第 N 圈"）—— 图注里本来就会列两颗样品的质量
+        _other = "1%Q④" if lab == "STD" else "STD"
+        c.ok(f"{_other} 第" not in svg, f"★ {nm} 的图例里没有另一个样品（每样品一张，不混）")
+    _d5 = (OUT / "图" / "dQdV_STD.svg").read_text(encoding="utf-8")
+    c.ok(any(x in _d5 for x in _F.EXP_RAMP), "★ 实验样那张用红系渐变色阶")
+    _d6 = (OUT / "图" / "dQdV_1%Q④.svg").read_text(encoding="utf-8")
+    c.ok(any(x in _d6 for x in _F.CTL_RAMP), "★ 对比样那张用蓝系渐变色阶")
     print()
     print(BAR)
     print("⑥ 段落缺失必须显式告警（不能静默留空）")

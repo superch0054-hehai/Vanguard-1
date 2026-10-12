@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import figures
 import probe
 from figures import (CE_CHARGE_OVER_DISCHARGE, CE_FLOOR_PCT, CMP_COLORS, MASS_G, SP_IMPLAUSIBLE_MAH_G,
-                     C_WARN, PALETTE_DQDV, CycleChart,
+                     C_WARN, PALETTE_DQDV, CycleChart, EXP_RAMP, CTL_RAMP,
                      ce_never_healthy, chart_avgv, chart_dqdv, chart_dqdv_sample,
                      chart_long_cycle, chart_rate, chart_vq, cycles_of,
                      cycles_of_detail, cycle_rates, dqdv_curve, dqdv_per_cycle,
@@ -414,8 +414,14 @@ def test_dqdv_multi(c: Checker) -> None:
          str([s["label"] for s in fig.left_series]))
     c.ok("第 1 圈" in svg and "第 2 圈" in svg, "图例写的是圈号")
     cols = [s["color"] for s in fig.left_series]
-    c.ok(cols[0] == cols[1] == PALETTE_DQDV[0] and cols[2] == cols[3] == PALETTE_DQDV[1],
-         "同一圈充放同色、不同圈用梯度色", str(cols))
+    # ★ 2026-10-12：圈次配色改成**角色渐变**（实验样红阶 / 对比样蓝阶，圈号越大越深）
+    c.ok(cols[0] == cols[1] and cols[2] == cols[3] and cols[0] != cols[2],
+         "同一圈充放同色、不同圈颜色不同（按圈号取渐变色阶）", str(cols))
+    c.ok(all(x in EXP_RAMP for x in cols),
+         "★ 判不出角色时按座次兜底：第 1 颗样品用红阶", str(cols))
+    _fc = chart_dqdv_sample("B", {"label": "对比样", "dqdv_multi": dm}, idx=1)
+    c.ok(all(s["color"] in CTL_RAMP for s in _fc.left_series),
+         "★ 对比样那张用蓝阶", str([s["color"] for s in _fc.left_series]))
     c.ok("电压 (V)" in svg, "★ X 轴仍是电压（dQ/dV 的横轴本来就是电压）")
     chg_ys = fig.left_series[0]["ys"]
     dis_ys = fig.left_series[1]["ys"]

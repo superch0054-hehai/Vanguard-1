@@ -148,7 +148,7 @@ def s31c(c: Ctx) -> str:
         out.append(f"{lab} 的稳态平均库伦效率与波动为 {num(g.get('CE_steady_mean'))}% / "
                    f"{num(g.get('CE_fluctuation'))}%，异常段方面{seg}")
     s = "两组稳态平均库伦效率方面，" + "；".join(out) + "。"
-    s += ("库仑效率口径为同圈充电容量 ÷ 放电容量（负极半电池，每圈先放电后充电），"
+    s += ("库伦效率口径为同圈充电容量 ÷ 放电容量（负极半电池，每圈先放电后充电），"
           "数值由程序给出，仅作引用。")
     s += f"曲线平滑度方面，两组均因圈数尚少无法判断。{c.ref_tab()}"
     return s
@@ -196,7 +196,7 @@ def s32d(c: Ctx) -> str:
          f"随循环呈{c.gy.get('dV_trend') or NA}趋势。")
     s += (f"能量效率 EE 的初值/末值分别为 {num(c.gy.get('EE_first_pct'))}% / "
           f"{num(c.gy.get('EE_last_pct'))}% 与 {num(c.gc.get('EE_first_pct'))}% / "
-          f"{num(c.gc.get('EE_last_pct'))}%，与库仑效率相比{c.gy.get('EE_vs_CE') or NA}。")
+          f"{num(c.gc.get('EE_last_pct'))}%，与库伦效率相比{c.gy.get('EE_vs_CE') or NA}。")
     s += (f"平台容量占比（放电容量中电压低于 0.10 V 的份额）的末圈两组数值分别为 "
           f"{num(c.gy.get('platform_share_last_pct'))}% 与 "
           f"{num(c.gc.get('platform_share_last_pct'))}%，差值为 "
@@ -206,10 +206,44 @@ def s32d(c: Ctx) -> str:
 
 
 def s33a(c: Ctx) -> str:
+    """3.2 倍率性能 —— ★ 2026-10-12 用户指出：原来**无条件**写"尚未进入倍率段"，
+    实测倍率段早就跑完了（13 档 × 6 圈 = 78 圈），整段结论是错的。
+    现在按真实分档数据写：每档取**末圈**放电比容量 + 差值 + 保持率/恢复率。"""
     prog = (c.g.get("test_conditions") or {}).get("rate_program") or NA
-    s = (f"本次测试设定的倍率程序为{prog}。截至本次数据，两颗电芯仍处于小电流活化阶段，"
-         f"尚未进入倍率段，各倍率档位的放电比容量与恢复保持率暂无法给出。")
-    s += f"当前放电比容量随循环的变化（同一批数据的长循环视图）{c.ref_fig()}。"
+    rs = c.d.get("rate_stats") or {}
+    steps = rs.get("steps") or []
+    ret = rs.get("retention") or {}
+    pn = rs.get("pairs") or [c.exp, c.ctrl]
+    if not steps:
+        return (f"本次测试设定的倍率程序为{prog}。截至本次数据，各倍率档位的放电比容量与"
+                f"恢复保持率暂无法给出。当前放电比容量随循环的变化{c.ref_fig()}。")
+    lo = steps[0]
+    hi_lab = ret.get("hi_label") or steps[-1]["label"]
+    hi = next((x for x in steps if x["label"] == hi_lab), steps[-1])
+    s = (f"本次测试设定的倍率程序为{prog}，分档以实测电流为准（与设定值偏差在 5% 以内）。"
+         f"每档取**该档最后一圈**的放电比容量作比较，以排除档内首圈活化的影响。"
+         f"首档 {lo['label']} 末圈，{pn[0]} 与 {pn[1]} 分别为 "
+         f"{num(lo.get('a'))} 与 {num(lo.get('b'))} mAh·g⁻¹；"
+         f"极限 {hi_lab} 档末圈分别为 {num(hi.get('a'))} 与 {num(hi.get('b'))} mAh·g⁻¹。")
+    diffs = [x["diff"] for x in steps if x.get("diff") is not None]
+    if diffs:
+        dmean = sum(diffs) / len(diffs)
+        who = (f"{pn[1]} 略高" if dmean < 0 else f"{pn[0]} 略高") if dmean else "两组持平"
+        s += (f"各档差值（{pn[0]} − {pn[1]}）介于 {min(diffs):+.2f} 与 {max(diffs):+.2f} "
+              f"mAh·g⁻¹ 之间，整体 {who}。")
+    kp, rp = ret.get("keep_pct") or [], ret.get("recover_pct") or []
+
+    def _pc(x):
+        """百分比；缺数就如实写 —— ⚠ 不能直接 {x:.1f}：某一颗的末档没跑到时它是 None，
+        格式化会当场抛 TypeError（真机实测崩过一次，本地假数据恰好都有值没抓到）。"""
+        return "（该项数据未提供）" if x is None else f"{x:.1f}%"
+
+    if len(kp) >= 2 and (kp[0] is not None or kp[1] is not None):
+        s += (f"以首档 {lo['label']} 末圈为基准，极限 {hi_lab} 档的容量保持率为 "
+              f"{_pc(kp[0])} 与 {_pc(kp[1])}，回到 {lo['label']} 的恢复率为 "
+              f"{_pc(rp[0] if len(rp) > 0 else None)} 与 "
+              f"{_pc(rp[1] if len(rp) > 1 else None)}（顺序：{pn[0]}、{pn[1]}）。")
+    s += f"各倍率档位放电比容量统计{c.ref_tab()}；放电比容量随循环的变化{c.ref_fig()}。"
     return s
 
 
@@ -293,8 +327,9 @@ def s35c(c: Ctx) -> str:
 def _verdict_block(c: Ctx, key: str) -> str:
     """4.1 各条结论段：该维度的事实 + 综合判断 + n=1 兜底。
 
-    ⚠️ 踩过的坑：维度名在数据里写的是「首次**库仑**效率」，关键词曾误写成「库**伦**」，
-    于是永远匹配不上、整段输出成"相关维度数据本次未取得"（S41C 实测）。
+    ⚠️ 踩过的坑：这个 key 必须与 report_pack.dimension_summary 里的**维度名**逐字一致
+    （"库仑/库伦"配不上就静默失配、整段输出"相关维度数据本次未取得"，S41C 实测踩过）。
+    ★ 2026-10-12：两处**统一**用"库伦"（正文 3.3 与表 5 一直是"库伦"）。
     """
     dims = c.d.get("dimension_summary") or []
     # 没数的维度不进结论句（magnitude 以"（"开头 = 数据未到/暂不统计）——
@@ -315,12 +350,24 @@ def s41a(c: Ctx) -> str:
 
 
 def s41b(c: Ctx) -> str:
-    return "倍率性能本次未取得\n" + ("本批数据尚未进入 0.2C→5C→0.2C 倍率段，"
-                                    "倍率维度的差异方向与幅度暂无法给出，需待数据到达后复测确认。")
+    """4.1.2 倍率维度结论 —— ★ 2026-10-12：原来无条件写"尚未进入倍率段"，
+    实测倍率段早已跑完；现在按极限档/首档的容量保持率给方向与幅度。"""
+    rs = c.d.get("rate_stats") or {}
+    kp = (rs.get("retention") or {}).get("keep_pct") or []
+    hi = (rs.get("retention") or {}).get("hi_label") or "极限档"
+    pn = rs.get("pairs") or [c.exp, c.ctrl]
+    if len(kp) >= 2 and None not in kp[:2]:   # 缺数就走下面的兜底分支，不硬算
+        d = round(kp[0] - kp[1], 1)
+        who = (f"{pn[0]} 略高" if d > 0 else f"{pn[1]} 略高") if d else "两组相当"
+        return ("倍率容量保持率基本相当" + chr(10) +
+                f"以首档 0.2C 末圈为基准，{hi} 档的容量保持率 {pn[0]} 为 {kp[0]:.1f}%、"
+                f"{pn[1]} 为 {kp[1]:.1f}%，相差 {abs(d):.1f} 个百分点，{who}。{N1_TAIL}。")
+    return ("倍率性能本次未取得" + chr(10) + "本批数据尚未进入 0.2C→5C→0.2C 倍率段，"
+            "倍率维度的差异方向与幅度暂无法给出，需待数据到达后复测确认。")
 
 
 def s41c(c: Ctx) -> str:
-    return "首圈库伦效率略有差异\n" + _verdict_block(c, "库仑")
+    return "首圈库伦效率略有差异\n" + _verdict_block(c, "库伦")
 
 
 def s41d(c: Ctx) -> str:

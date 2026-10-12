@@ -453,6 +453,12 @@ def _is_std_q_pair(labels: dict[str, str]) -> bool:
 #   那里写的是"实测"，两不混淆。
 VOLTAGE_WINDOW_SET = "0.01~2.0 V（设定窗口）"
 
+# 硬碳标称比容量（报告 2.2 同口径）：1C = 300 mA·g⁻¹。倍率统计要用它把实测电流
+# 换算成 C 倍率（nominal_mAh = 300 × 活性物质质量）。
+NOMINAL_MAH_PER_G = 300.0
+# 倍率程序（报告 2.3 同口径）：0.2C→5C→0.2C，13 档 × 6 圈 = 78 圈
+RATE_PROGRAM_C = (0.2, 0.5, 1, 2, 3, 4, 5, 4, 3, 2, 1, 0.5, 0.2)
+
 
 # 协会《钠离子电池电解液添加剂 Q④ 性能测试分析报告·第二版》里的体系与工步口径。
 # 只在与该报告同一体系（STD vs 1% Q④）时填入报告 —— 见 _is_std_q_pair。
@@ -467,7 +473,9 @@ DEFAULT_DOSAGE = "1 wt%"
 # ★ 图号 ↔ 用哪一对通道 —— **唯一出处**：出图（report_build）与渲染（render.py）都查它。
 #   图 6 已取消（用户 2026-10-09 决定）：报告共 5 张图。
 #   对① = 长循环（10-1 实验样 vs 10-2 对比样）；对② = 倍率（10-3 实验样 vs 10-4 对比样）。
-FIGURE_PAIRS = {1: 1, 2: 2, 3: 1, 4: 1, 5: 1}
+# ★ 2026-10-12 用户要求：dQ/dV 拆回"每样品一张"（图 5 = 实验样、图 6 = 对比样，
+#   同图内氧化+还原、按圈号红/蓝渐变）—— 图 6 因此恢复，共 6 张图。
+FIGURE_PAIRS = {1: 1, 2: 2, 3: 1, 4: 1, 5: 1, 6: 1}
 
 
 def figure_map(labels: dict[str, str], chs: list[str]) -> dict:
@@ -559,7 +567,9 @@ def build_global_context(labels: dict[str, str], cells: dict[str, dict],
                               "剔除库伦效率持续超过 100.5% 的异常尾段",
                               "测试进行中，本报告为阶段性数据"],
         },
-        "statistics": {"n_parallel": 1, "significance_thresholds": THRESHOLDS},
+        "statistics": {"n_parallel": 1, "significance_thresholds": THRESHOLDS,
+                       # 倍率统计用：标称容量 = 300 mAh/g × 活性物质质量（g）
+                       "nominal_mah": NOMINAL_MAH_PER_G * mass_mg / 1000.0},
         "mass": {"mass_mg": mass_mg, "note": "暂定值（2026-10-01 用户给定），待测试记录确认"},
         "generated": generated,
         "generator": f"report_pack {VERSION}",
@@ -858,8 +868,20 @@ def build_block_data(block_id: str, cells: dict[str, dict],
                 base["platform_share_diff_pct"] = round(ps[1] - ps[0], 2)
         base["notes"].append("EE 与 CE 的下降幅度要分别陈述，不得混为一谈")
     elif block_id in ("S33A", "S33B"):
-        base["notes"].append("★ 本批数据尚未进入 0.2C→5C→0.2C 倍率段（仍在活化段），"
-                             "倍率维度数据未提供——正文如实写「（该项数据未提供）」")
+        # ★ 2026-10-12：原来这里无条件写"尚未进入倍率段" —— 实测**倍率段早就跑完了**
+        #   （对比样 13 档 × 6 圈 = 78 圈齐），于是 3.2 与表 4 一整套结论都是错的
+        #   （用户实指出）。现在按数据算：每档取**末圈**放电比容量 + 差值 + 保持率。
+        base["rate_stats"] = rate_step_stats(cells, labels, chs,
+                                            ctx["statistics"].get("nominal_mah"))
+        _rs = base["rate_stats"]
+        base["notes"].append("★ 倍率口径（用户 2026-10-12 指定）：每档取**该档最后一圈**"
+                             "的放电比容量，两样品同档相减得差值；倍率档位按设定程序"
+                             "0.2C→5C→0.2C（13 档 × 6 圈 = 78 圈），分档以实测电流为准")
+        _r = _rs.get("retention") or {}
+        if _r.get("keep_pct"):
+            base["notes"].append(f"倍率相关保持率 = 极限档 {_r.get('hi_label')} 末圈 ÷ "
+                                 "首档 0.2C 末圈；恢复率 = 末档 0.2C 末圈 ÷ 首档 0.2C 末圈")
+        base["notes"].append("每档末圈容量用于消除初圈活化影响，不得改用档内均值或首圈")
     elif block_id == "S34A":
         for key, cell in ((a, ca), (b, cb)):
             if cell:
@@ -888,7 +910,8 @@ def build_block_data(block_id: str, cells: dict[str, dict],
                              "本轮数据未到，如实写「（该项数据未提供）」")
     elif block_id in ("S35A", "S35B", "S35C", "S41A", "S41B", "S41C", "S41D",
                       "S51A", "S51B", "S51C"):
-        base["dimension_summary"] = dimension_summary(cells, labels, chs)
+        base["dimension_summary"] = dimension_summary(
+            cells, labels, chs, nominal_mah=ctx["statistics"].get("nominal_mah"))
         base["notes"].append("n_parallel = 1，所有差异幅度需与个体波动范围阈值对照")
         if block_id in ("S41A", "S41B", "S41C"):
             base["cross_check"] = None
@@ -917,7 +940,10 @@ def build_block_data(block_id: str, cells: dict[str, dict],
     elif block_id == "S52C":
         base["outlook"] = {"deep_research": OUTLOOK["deep_research"]}
     elif block_id == "S52D":
-        base["closing"] = "Q④ 添加剂体系在醚类电解液中具备进一步研究的价值"
+        # ★ 2026-10-12：additive 名字必须跟着 variable 走 —— 写死 Q④ 会在 PBSF 批次里
+        #   把"别的添加剂"的结论印进报告（用户实指出）。
+        _v = (ctx.get("variable") or {}).get("type") or "本批添加剂"
+        base["closing"] = f"{_v} 在醚类电解液中具备进一步研究的价值"
 
     # ---- P1b：图号/表号由**数据包**给出（不写死在提示词里）----
     base["figure_ref"], base["table_ref"] = BLOCK_REFS.get(block_id, (None, None))
@@ -938,6 +964,83 @@ def peaks(dq: dict) -> dict:
     return out
 
 
+def rate_step_stats(cells: dict[str, dict], labels: dict[str, str],
+                    chs: list[str], nominal_mah: float | None) -> dict:
+    """按倍率档统计 —— ★ 2026-10-12 用户指定口径：每档取**该档最后一圈**的放电比容量。
+
+    分档：每圈平均放电电流 ÷ 标称容量 = 实测 C 倍率，按 **1 位小数**分组 ——
+    电流有微抖动（实测 4.84/4.83 mA 交替），按精确值分组会把一个 5C 档拆成 6 个
+    "单圈档"（真机上确实这样碎过）。
+    档名：分出的档数 == 13 时用**设定程序**的名字（0.2C…5C…0.2C）；否则老实标"（实测）"。
+
+    返回 {"pairs":[实验样名, 对比样名], "steps":[{label,a,b,diff,a_cycle,b_cycle}],
+          "retention":{...}}；缺数据的档 a/b 记 None，不猜。
+    """
+    from itertools import groupby
+    keys = [k for k in list(chs)[2:4] if k in labels] or list(chs)[:2]
+    names = [labels.get(k, k) for k in keys]
+    per: dict = {}
+    for k in keys:
+        cs = ((cells.get(k) or {}).get("cs_plot") or [])
+        gs: list = []
+        if nominal_mah:
+            for _lab, g in groupby(cs, key=lambda c: round((c.get("ma") or 0.0) / nominal_mah, 1)):
+                g = list(g)
+                gs.append({"measured": round((g[-1].get("ma") or 0.0) / nominal_mah, 2),
+                           "last": g[-1]})
+        per[k] = gs
+    n = max((len(v) for v in per.values()), default=0)
+    def _label(i: int, gs) -> str:
+        """第 i 个档叫什么 —— **位置对齐 + 实测复核**。
+
+        为什么不用"档数 == 13 才用设定名"：实测末档常常少一圈（实验样 73/78），
+        档数对不上就整列退回"（实测）"，表头就变成 0.19C/0.48C 这种难看的数。
+        改成按位置取设定名，但**必须**实测电流与设定档位差 ≤20% 才敢用设定名 ——
+        万一中间缺档导致错位，复核会拦下、老实退回"（实测）"。
+        """
+        m = next((g["measured"] for g in gs if g), None)
+        if m is None:
+            return f"第 {i + 1} 档"
+        nom = RATE_PROGRAM_C[i] if i < len(RATE_PROGRAM_C) else None
+        if nom and abs(m - nom) <= max(0.2 * nom, 0.05):
+            return f"{nom:g}C"
+        return f"{m:g}C（实测）"
+
+    steps = []
+    for i in range(n):
+        gs = [per.get(k, [])[i] if i < len(per.get(k, [])) else None for k in keys]
+        label = _label(i, gs)
+        vals = [((g or {}).get("last") or {}).get("dis_sp") for g in gs]
+        cycs = [((g or {}).get("last") or {}).get("cycle") for g in gs]
+        steps.append({"label": label,
+                      "a": vals[0] if vals else None,
+                      "b": vals[1] if len(vals) > 1 else None,
+                      "diff": (round(vals[0] - vals[1], 2)
+                               if len(vals) > 1 and None not in vals[:2] else None),
+                      "a_cycle": cycs[0] if cycs else None,
+                      "b_cycle": cycs[1] if len(cycs) > 1 else None})
+    ret: dict = {}
+    if steps:
+        def _rate(i: int) -> float:
+            return max(((per.get(k, [])[i] or {}).get("measured") or 0)
+                       for k in keys if i < len(per.get(k, []))) if keys else 0
+        hi = max(range(len(steps)), key=_rate)
+
+        def _pct(i_hi: int, i_lo: int) -> list:
+            out = []
+            for k in keys:
+                gh = per.get(k, [])[i_hi] if i_hi < len(per.get(k, [])) else None
+                gl = per.get(k, [])[i_lo] if i_lo < len(per.get(k, [])) else None
+                va = ((gh or {}).get("last") or {}).get("dis_sp")
+                vb = ((gl or {}).get("last") or {}).get("dis_sp")
+                out.append(round(va / vb * 100, 1) if (va and vb) else None)
+            return out
+        ret["keep_pct"] = _pct(hi, 0)                  # 极限档 / 首档 0.2C
+        ret["recover_pct"] = _pct(len(steps) - 1, 0)   # 末档 0.2C / 首档 0.2C
+        ret["hi_label"] = steps[hi]["label"]
+    return {"pairs": names, "steps": steps, "retention": ret}
+
+
 def _dim_row(name: str, va, vb, la: str, lb: str, unit: str,
              bigger: str = "略高", ndigits: int = 2) -> dict:
     """一个对比维度：有数 → 方向+幅度；缺数 → 保留行、标（数据未到）（B7：不许砍维度）。"""
@@ -956,7 +1059,7 @@ def _retention_last(cell: dict):
 
 
 def dimension_summary(cells: dict[str, dict], labels: dict[str, str],
-                      chs: list[str]) -> list[dict]:
+                      chs: list[str], nominal_mah: float | None = None) -> list[dict]:
     """台账：每个维度的方向与幅度（S35/S41/S51 的输入 + 报告表 9）。
 
     ★ 2026-10-10 修改清单 B7：扩成**全维度** —— 数据没到的维度**保留行**、
@@ -964,22 +1067,24 @@ def dimension_summary(cells: dict[str, dict], labels: dict[str, str],
     ⚠ 两个"速率"维度（容量衰减速率 / 平均放电电压衰减速率）目前都是在
     小电流活化段上拟合的，数值无意义 —— 与 A3 同一结论，先按"暂不统计"呈现，
     等 1C 段开始后由 A3 的拍板方案统一接上。
-    ⚠ 维度名会被 compose._verdict_block 按关键词（"容量"/"库仑"/"极化"）匹配：
-      · "首次库仑效率"保持"库仑"拼写不动（拼成"库伦"会静默失配，实测踩过）；
-      · 新增的"稳态平均库伦效率"用的是"库伦"，恰好不撞"库仑"那个键。
+    ⚠ 维度名会被 compose._verdict_block 按关键词（"容量"/"库伦"/"极化"）匹配。
+      ★ 2026-10-12：全文统一用**"库伦"**（正文 3.3 与表 5 一直是"库伦"，只有这里写
+      "库仑"，用户指出不一致）—— compose 的匹配键必须**同时**改成"库伦"，否则会
+      静默失配（历史踩过："库仑/库伦"配不上 → 整段输出"相关维度数据本次未取得"）。
     """
     a, b = (chs + [None, None])[:2]
     ca, cb = cells.get(a, {}), cells.get(b, {})
     la, lb = labels.get(a, a), labels.get(b, b)
     fa, fb = ca.get("first") or {}, cb.get("first") or {}
     out = [
-        _dim_row("放电比容量（最新）", ca.get("dis_sp_last"), cb.get("dis_sp_last"),
+        # 两样品的有效圈数不同（各自最新圈不等于同圈龄），行名如实写出来
+        _dim_row("放电比容量（各自最新圈）", ca.get("dis_sp_last"), cb.get("dis_sp_last"),
                  la, lb, "mAh·g⁻¹"),
         _dim_row("首圈放电比容量", fa.get("discharge_sp"), fb.get("discharge_sp"),
                  la, lb, "mAh·g⁻¹"),
         _dim_row("首圈不可逆容量", fa.get("irreversible_sp"), fb.get("irreversible_sp"),
                  la, lb, "mAh·g⁻¹", bigger="略大"),
-        _dim_row("首次库仑效率", fa.get("ce"), fb.get("ce"), la, lb, "pp"),
+        _dim_row("首次库伦效率", fa.get("ce"), fb.get("ce"), la, lb, "pp"),
         _dim_row("容量保持率（基线第 4 圈→最新）", _retention_last(ca), _retention_last(cb),
                  la, lb, "pp"),
         # 两个"速率"维度：活化段拟合无意义（同 A3），先不统计
@@ -991,8 +1096,17 @@ def dimension_summary(cells: dict[str, dict], labels: dict[str, str],
                  la, lb, "mV", bigger="略大", ndigits=1),
         {"name": "平均放电电压衰减速率", "direction": "—",
          "magnitude": "（1C 长循环段未开始，暂不统计）"},
-        {"name": "倍率相关保持率", "direction": "—", "magnitude": "（数据未到）"},
     ]
+    # 倍率相关保持率（★ 2026-10-12：倍率段跑完后不再是"数据未到"，从实测算）
+    _rs = rate_step_stats(cells, labels, chs, nominal_mah)
+    _keep = (_rs.get("retention") or {}).get("keep_pct") or []
+    if len(_keep) >= 2 and None not in _keep[:2]:
+        _hi = (_rs.get("retention") or {}).get("hi_label") or "极限档"
+        _pn = _rs.get("pairs") or [la, lb]
+        out.append(_dim_row(f"倍率相关保持率（{_hi}/0.2C）", _keep[0], _keep[1],
+                            _pn[0], _pn[1], "pp", ndigits=1))
+    else:
+        out.append({"name": "倍率相关保持率", "direction": "—", "magnitude": "（数据未到）"})
     # dQ/dV 峰特征：主峰位置有数（第 1 圈），峰宽/峰高/面积占比待更多圈次
     pa = peaks(ca["dqdv"]) if ca.get("dqdv") else {}
     pb = peaks(cb["dqdv"]) if cb.get("dqdv") else {}

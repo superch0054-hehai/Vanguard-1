@@ -46,7 +46,7 @@ NO_NUMBER_RULE = """\
 【最重要的一条】你写的内容里**不许出现任何测试数值** —— 容量、比容量、库伦效率、保持率、
 ΔV、峰位/峰间距、圈数、衰减速率……一个都不要写（数字由程序段承载，会随每日数据自动更新；
 你写了数字，数据一变它就成了过期的假数）。要引用数据就写「见表 X」「见图 X」。
-允许出现的只有：章节号与图表号（4.1、表 4、图 3）、变量定义（1 wt%、Q④）、样本量口径（n = 1、单颗电芯）。
+允许出现的只有：章节号与图表号（4.1、表 4、图 3）、变量定义（1 wt%、PBSF）、样本量口径（n = 1、单颗电芯）。
 """
 
 
@@ -134,6 +134,10 @@ def main() -> int:
         Path("/tmp/ai_raw.txt").write_text(out, encoding="utf-8")
         return 0
     got = {k: v for k, v in blocks.items() if k in (only or AI_BLOCKS)}
+    # ★ 2026-10-12：术语归一 —— 正文/表格统一「库伦效率」，模型偶写「库仑」会与表格
+    #   不一致（用户实指出）。这里做一次定点替换，只动这四个字，不碰别的。
+    got = {k: (v.replace("库仑效率", "库伦效率") if isinstance(v, str) else v)
+           for k, v in got.items()}
     batch = pkg / "批量稿.json"
     batch.write_text(json.dumps(got, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"  ✓ 模型返回 {len(blocks)} 段，采信 {len(got)} 段")

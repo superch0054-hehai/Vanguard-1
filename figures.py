@@ -660,6 +660,33 @@ def cmp_color(label: str, idx: int = 0) -> str:
     return CMP_COLORS[idx % len(CMP_COLORS)]
 
 
+# 逐圈 dQ/dV 图（图 5/6）的**渐变色阶** —— ★ 2026-10-12 用户指定：
+#   实验样=红系渐变、对比样=蓝系渐变，圈号越大越深（一眼看出"第几圈"）。
+#   两条色阶的**明度跨度拉满**（浅到深约 3 倍差距），这样 5 条同族曲线仍分得开
+#   —— 早先用过"一片橙黄"，三条就分不清了（见下面 PALETTE_DQDV 的注释）。
+EXP_RAMP = ["#f4b1aa", "#e8756a", "#d0392b", "#9e2418", "#6b150d"]
+CTL_RAMP = ["#a9c9ea", "#5f9ed6", "#2f74b5", "#1c4e7d", "#10334f"]
+
+
+def cycle_color(label: str, i: int, n: int = 5, idx: int = 0) -> str:
+    """第 i 条曲线（按圈号升序）该用哪一档颜色。
+
+    按角色名选色阶；判不出角色（样品名不是"实验样/对比样"）时按**座次**兜底 ——
+    否则两颗样品会都拿到红阶，两张图分不出来。
+    """
+    s0 = str(label or "")
+    if "对比" in s0:
+        ramp = CTL_RAMP
+    elif "实验" in s0:
+        ramp = EXP_RAMP
+    else:
+        ramp = [EXP_RAMP, CTL_RAMP][idx % 2]
+    if n <= 1:
+        return ramp[-1]
+    j = round(i * (len(ramp) - 1) / (n - 1))
+    return ramp[max(0, min(len(ramp) - 1, j))]
+
+
 def chart_long_cycle(title: str, cells: list[dict],
                      mass_g: float | None = None) -> CycleChart:
     """参考图一（长循环）**对比版**：多个样品的充/放容量（左轴）＋库仑效率（右轴）。
@@ -838,22 +865,29 @@ def vq_curves(detail_rows: list[dict],
     return {"charge": charge, "discharge": discharge, "ice": ice}
 
 
-def chart_vq(title: str, cells: list[dict]) -> CycleChart:
-    """参考图三（首效）**对比版**：各样品首圈充/放电 电压-容量曲线，图例各标 ICE。
+def chart_vq(title: str, cells: list[dict],
+             mass_g: float | None = None) -> CycleChart:
+    """参考图三（首效）**对比版**：各样品首圈充/放电 电压-比容量曲线，图例各标 ICE。
 
     cells: [{"label", "curves"}] —— curves 是 vq_curves() 的返回
     （charge/discharge 的 (Q_mAh, V) 点列 + ice）。
+
+    ★ 2026-10-12 用户指出：横坐标要给**比容量**不是绝对容量（图题写的就是"比容量"）。
+    mass_g 给了 → x = Q/mass（mAh·g⁻¹）；没给才退回绝对容量 (mAh)，轴标题如实标注。
     """
-    fig = CycleChart(title, "电压 (V)", "", x_label="容量 (mAh)")
+    use_sp = mass_g is not None
+    k = 1.0 / mass_g if use_sp else 1.0
+    fig = CycleChart(title, "电压 (V)", "",
+                     x_label="比容量 (mAh·g⁻¹)" if use_sp else "容量 (mAh)")
     for i, cell in enumerate(cells):
         color = cmp_color(cell.get("label", ""), i)
         cur = cell.get("curves") or {}
         ice = cur.get("ice")
         ice_txt = f"（ICE {ice:.2f}%）" if ice else ""
-        fig.add_left([q for q, _ in cur.get("charge", [])],
+        fig.add_left([q * k for q, _ in cur.get("charge", [])],
                      [v for _, v in cur.get("charge", [])],
                      f"{cell['label']} 充电{ice_txt}", color=color)
-        fig.add_left([q for q, _ in cur.get("discharge", [])],
+        fig.add_left([q * k for q, _ in cur.get("discharge", [])],
                      [v for _, v in cur.get("discharge", [])],
                      f"{cell['label']} 放电", color=color)
     return fig
@@ -1006,7 +1040,7 @@ def pick_dqdv_cycles(requested: list[int], available: list[int],
 
 def chart_dqdv_sample(title: str, cell: dict,
                       y_label: str = "dQ/dV (mAh V⁻¹)",
-                      reduction_positive: bool = True) -> CycleChart:
+                      reduction_positive: bool = True, idx: int = 0) -> CycleChart:
     """**一个样品一张**的 dQ/dV 图：同圈的氧化(充电)与还原(放电)画在同一幅里，
     不同圈用一族色（`PALETTE_DQDV` 由浅到深）区分 —— 就是参考图五的样子。
 
@@ -1021,8 +1055,10 @@ def chart_dqdv_sample(title: str, cell: dict,
     # 两个分支乘同一个符号：原本"充电为正、放电为负"，乘 -1 就变成
     # "放电(还原/嵌入)为正、充电(氧化/脱出)为负"。
     sign = -1.0 if reduction_positive else 1.0
-    for i, cyc in enumerate(sorted(dm)):
-        color = PALETTE_DQDV[i % len(PALETTE_DQDV)]
+    _cycs = sorted(dm)
+    for i, cyc in enumerate(_cycs):
+        # ★ 2026-10-12：按**角色**取渐变色阶（实验样红系 / 对比样蓝系），圈号越大越深
+        color = cycle_color(cell.get("label", ""), i, len(_cycs), idx)
         brs = dm[cyc]
         # 图例只挂一份/圈（同一圈的两个分支同色，一上一下分居轴两侧）
         for key, lab in (("chg", f"第 {cyc} 圈"), ("dis", None)):
