@@ -446,17 +446,12 @@ def _is_std_q_pair(labels: dict[str, str]) -> bool:
     return ("STD" in tx) and ("Q" in tx)
 
 
-def _voltage_window(cells: dict[str, dict], labels: dict[str, str]) -> str | None:
-    """实测电压窗口（取各样品明细层的并集）。拿不到就 None —— 不许编。
-
-    为什么现算：这个值以前是写死的 "0.02~3.31 V"，那是另一批 3.3 V 体系数据的窗口。
-    换到 2 V 体系的样品后，报告表 3 里会留着别的实验的数字 —— 这种错从结果上看不出来。
-    """
-    los = [c["v_min"] for c in cells.values() if c.get("v_min") is not None]
-    his = [c["v_max"] for c in cells.values() if c.get("v_max") is not None]
-    if not los or not his:
-        return None
-    return f"{min(los):.2f}~{max(his):.2f} V（实测范围，待实验室确认）"
+# ★ 2026-10-10 修改清单 B1：电压窗口改用**设定窗口**。
+#   以前这里放的是从明细层现算的"实测范围"（0.01~2.14 V，还带着"待实验室确认"）——
+#   实测最高会比设定上限高一点（极化/过充测量），把实测当设定写进 2.2 是口径错误。
+#   设定窗口由用户给定（2026-10-10 批注：0.01~2.0 V）。实测范围仍在 3.x 各节出现，
+#   那里写的是"实测"，两不混淆。
+VOLTAGE_WINDOW_SET = "0.01~2.0 V（设定窗口）"
 
 
 # 协会《钠离子电池电解液添加剂 Q④ 性能测试分析报告·第二版》里的体系与工步口径。
@@ -494,13 +489,19 @@ SYSTEM_STD_Q = {
     "electrolyte_experimental": "基础电解液 + 1 wt% Q④（含氟分子）",
     "ions": "Na⁺",
 }
-TEST_COND_STD_Q = {
-    "temperature": "25±1 ℃",
-    "humidity": "< 10% RH",
+# ★ 2026-10-10 修改清单 B1/B2：本批实验的**设定条件**由用户给定，不再挂在
+#   "标签像不像 STD/Q④"上 —— 以前 std_q 不成立时这里全给 None，报告 2.2/2.3
+#   一片"（未提供）"。温度 28 ℃ 是用户批注给的（协会报告的 25±1 ℃ 是**它们那批**
+#   的条件，不能抄）；湿度用户没给，按 A2 留占位。
+#   ⚠ formation / rate_program / long_cycle_rate 的值**不带括号** —— 它们在 2.3
+#   正文里会被套进"（…）"里用，值里再带括号就成"（（…））"（实测出过）。
+TEST_COND = {
+    "temperature": "28 ℃",
+    "humidity": None,            # A2：待实验室提供（协会口径 <10% RH，给了再填）
     "nominal_specific_capacity": "300 mAh·g⁻¹（硬碳，1C = 300 mA·g⁻¹）",
-    "formation": "0.1C × 3 圈（化成活化，形成初始 SEI）",
-    "long_cycle_rate": "1C（自第 4 圈起恒定充放电）",
-    "rate_program": "0.2C→5C→0.2C，13 个倍率档 × 6 圈 = 78 圈",
+    "formation": "0.1C × 3 圈",
+    "long_cycle_rate": "1C 恒流充放电，自第 4 圈起",
+    "rate_program": "0.2C→5C→0.2C，每档 6 圈、共 13 档 78 圈",
 }
 
 
@@ -539,14 +540,14 @@ def build_global_context(labels: dict[str, str], cells: dict[str, dict],
             "pair2_experimental_short": labels.get(chs[3], "") if len(chs) > 3 else "",
         },
         "test_conditions": {
-            "temperature": TEST_COND_STD_Q["temperature"] if std_q else None,
-            "humidity": TEST_COND_STD_Q["humidity"] if std_q else None,
-            "voltage_window": _voltage_window(cells, labels),
-            "nominal_specific_capacity": TEST_COND_STD_Q["nominal_specific_capacity"]
-            if std_q else None,
-            "formation": TEST_COND_STD_Q["formation"] if std_q else None,
-            "long_cycle_rate": TEST_COND_STD_Q["long_cycle_rate"] if std_q else None,
-            "rate_program": TEST_COND_STD_Q["rate_program"] if std_q else None,
+            # ★ 2026-10-10 B1/B2：设定条件**无条件**写入（不再是 std_q 时候才给）。
+            "temperature": TEST_COND["temperature"],
+            "humidity": TEST_COND["humidity"],
+            "voltage_window": VOLTAGE_WINDOW_SET,
+            "nominal_specific_capacity": TEST_COND["nominal_specific_capacity"],
+            "formation": TEST_COND["formation"],
+            "long_cycle_rate": TEST_COND["long_cycle_rate"],
+            "rate_program": TEST_COND["rate_program"],
             "retention_baseline_cycle": BASELINE_CYCLE,
             "retention_baseline_note": (
                 f"基线为第 {BASELINE_CYCLE} 圈（化成后首个 1C 循环，协会第二版报告口径）"
@@ -577,12 +578,15 @@ _PROHIBIT = ("不得", "禁止", "不要", "必须", "只准", "一律记", "一
 # 以前 12 处"末句写……见图 N/见表 N"写死在提示词里，改一次图序就要重跑十几段正文。
 # 现在编号只在这里出现，提示词让模型去读数据包的 figure_ref / table_ref。
 BLOCK_REFS = {
-    "S31A": ("图 1", None), "S31B": (None, "表 4"), "S31C": (None, None),
-    "S33A": ("图 2", None), "S33B": (None, "表 5"),
-    "S32A": ("图 3", None), "S32B": (None, "表 6"),
-    "S32C": ("图 4", None), "S32D": (None, "表 7"),
-    "S34A": ("图 5", None), "S34B": (None, "表 8"), "S34C": (None, None),
-    "S35A": (None, "表 9"), "S35B": (None, "表 10"), "S35C": (None, None),
+    # ★ 2026-10-10 修改清单 B4：原表 3（核心测试工步与数据处理口径）整表删除
+    #   （与 2.2/2.3 正文重复），表号**顺延补齐** —— 报告里不留缺口，
+    #   后面的表全部前移一位（原表 4→表 3 … 原表 10→表 9）。
+    "S31A": ("图 1", None), "S31B": (None, "表 3"), "S31C": (None, None),
+    "S33A": ("图 2", None), "S33B": (None, "表 4"),
+    "S32A": ("图 3", None), "S32B": (None, "表 5"),
+    "S32C": ("图 4", None), "S32D": (None, "表 6"),
+    "S34A": ("图 5", None), "S34B": (None, "表 7"), "S34C": (None, None),
+    "S35A": (None, "表 8"), "S35B": (None, "表 9"), "S35C": (None, None),
 }
 
 
@@ -731,7 +735,7 @@ def build_block_data(block_id: str, cells: dict[str, dict],
             base["statement_goal"] = None
             base["notes"].append("实验变量未提供")
     elif block_id == "S31A":
-        base["rate"] = TEST_COND_STD_Q["long_cycle_rate"] if ctx["variable"].get("type") else None
+        base["rate"] = TEST_COND["long_cycle_rate"]   # 设定条件 2026-10-10 起无条件提供（B1/B2）
         for key, cell in ((a, ca), (b, cb)):
             if cell:
                 base["groups"][labels[key]] = {
@@ -934,27 +938,82 @@ def peaks(dq: dict) -> dict:
     return out
 
 
+def _dim_row(name: str, va, vb, la: str, lb: str, unit: str,
+             bigger: str = "略高", ndigits: int = 2) -> dict:
+    """一个对比维度：有数 → 方向+幅度；缺数 → 保留行、标（数据未到）（B7：不许砍维度）。"""
+    if va is None or vb is None:
+        return {"name": name, "direction": "—", "magnitude": "（数据未到）"}
+    d = round(va - vb, ndigits)
+    if d == 0:
+        return {"name": name, "direction": "基本一致", "magnitude": f"0 {unit}"}
+    return {"name": name, "direction": f"{la if d > 0 else lb} {bigger}",
+            "magnitude": f"{abs(d)} {unit}"}
+
+
+def _retention_last(cell: dict):
+    rel = (cell or {}).get("retention_rel_base") or {}
+    return rel.get(max(rel)) if rel else None
+
+
 def dimension_summary(cells: dict[str, dict], labels: dict[str, str],
                       chs: list[str]) -> list[dict]:
-    """台账：每个维度的方向与幅度（S35/S41/S51 的输入）。"""
+    """台账：每个维度的方向与幅度（S35/S41/S51 的输入 + 报告表 9）。
+
+    ★ 2026-10-10 修改清单 B7：扩成**全维度** —— 数据没到的维度**保留行**、
+    标「（数据未到）」，不许砍（协会报告的表 9 就是全维度对齐）。
+    ⚠ 两个"速率"维度（容量衰减速率 / 平均放电电压衰减速率）目前都是在
+    小电流活化段上拟合的，数值无意义 —— 与 A3 同一结论，先按"暂不统计"呈现，
+    等 1C 段开始后由 A3 的拍板方案统一接上。
+    ⚠ 维度名会被 compose._verdict_block 按关键词（"容量"/"库仑"/"极化"）匹配：
+      · "首次库仑效率"保持"库仑"拼写不动（拼成"库伦"会静默失配，实测踩过）；
+      · 新增的"稳态平均库伦效率"用的是"库伦"，恰好不撞"库仑"那个键。
+    """
     a, b = (chs + [None, None])[:2]
     ca, cb = cells.get(a, {}), cells.get(b, {})
-    out = []
-    if ca.get("dis_sp_last") is not None and cb.get("dis_sp_last") is not None:
-        d = round(ca["dis_sp_last"] - cb["dis_sp_last"], 2)
-        out.append({"name": "放电比容量（最新）", "direction":
-                    f"{labels.get(a, a)} 略高" if d > 0 else f"{labels.get(b, b)} 略高",
-                    "magnitude": f"{abs(d)} mAh/g"})
-    if ca.get("first", {}).get("ce") is not None and cb.get("first", {}).get("ce") is not None:
-        d = round(ca["first"]["ce"] - cb["first"]["ce"], 2)
-        out.append({"name": "首次库仑效率", "direction":
-                    f"{labels.get(a, a)} 略高" if d > 0 else f"{labels.get(b, b)} 略高",
-                    "magnitude": f"{abs(d)} pp"})
-    if ca.get("dv_mean") is not None and cb.get("dv_mean") is not None:
-        d = round(ca["dv_mean"] - cb["dv_mean"], 1)
-        out.append({"name": "极化 ΔV", "direction":
-                    f"{labels.get(a, a)} 略大" if d > 0 else f"{labels.get(b, b)} 略大",
-                    "magnitude": f"{abs(d)} mV"})
+    la, lb = labels.get(a, a), labels.get(b, b)
+    fa, fb = ca.get("first") or {}, cb.get("first") or {}
+    out = [
+        _dim_row("放电比容量（最新）", ca.get("dis_sp_last"), cb.get("dis_sp_last"),
+                 la, lb, "mAh·g⁻¹"),
+        _dim_row("首圈放电比容量", fa.get("discharge_sp"), fb.get("discharge_sp"),
+                 la, lb, "mAh·g⁻¹"),
+        _dim_row("首圈不可逆容量", fa.get("irreversible_sp"), fb.get("irreversible_sp"),
+                 la, lb, "mAh·g⁻¹", bigger="略大"),
+        _dim_row("首次库仑效率", fa.get("ce"), fb.get("ce"), la, lb, "pp"),
+        _dim_row("容量保持率（基线第 4 圈→最新）", _retention_last(ca), _retention_last(cb),
+                 la, lb, "pp"),
+        # 两个"速率"维度：活化段拟合无意义（同 A3），先不统计
+        {"name": "容量衰减速率", "direction": "—",
+         "magnitude": "（1C 长循环段未开始，暂不统计）"},
+        _dim_row("稳态平均库伦效率", ca.get("ce_steady_mean"), cb.get("ce_steady_mean"),
+                 la, lb, "pp"),
+        _dim_row("极化 ΔV", ca.get("dv_mean"), cb.get("dv_mean"),
+                 la, lb, "mV", bigger="略大", ndigits=1),
+        {"name": "平均放电电压衰减速率", "direction": "—",
+         "magnitude": "（1C 长循环段未开始，暂不统计）"},
+        {"name": "倍率相关保持率", "direction": "—", "magnitude": "（数据未到）"},
+    ]
+    # dQ/dV 峰特征：主峰位置有数（第 1 圈），峰宽/峰高/面积占比待更多圈次
+    pa = peaks(ca["dqdv"]) if ca.get("dqdv") else {}
+    pb = peaks(cb["dqdv"]) if cb.get("dqdv") else {}
+    va = (pa.get("dis") or {}).get("voltage_V")
+    vb = (pb.get("dis") or {}).get("voltage_V")
+    if va is not None and vb is not None:
+        ddis = round((va - vb) * 1000)
+        vca = (pa.get("chg") or {}).get("voltage_V")
+        vcb = (pb.get("chg") or {}).get("voltage_V")
+        dchg = round((vca - vcb) * 1000) if (vca is not None and vcb is not None) else None
+        mag = f"放电主峰差 {abs(ddis)} mV"
+        if dchg is not None:
+            mag += f"、充电主峰差 {abs(dchg)} mV"
+        out.append({"name": "dQ/dV 主峰位置（充电/放电）",
+                    "direction": "基本一致" if ddis == 0 else f"{la if ddis > 0 else lb} 略高",
+                    "magnitude": mag})
+    else:
+        out.append({"name": "dQ/dV 主峰位置（充电/放电）",
+                    "direction": "—", "magnitude": "（数据未到）"})
+    out.append({"name": "dQ/dV 峰宽/峰高/面积占比",
+                "direction": "—", "magnitude": "（数据未到）"})
     return out
 
 

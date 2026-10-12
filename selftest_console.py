@@ -11,6 +11,7 @@
 """
 
 import json
+import re
 import shutil
 import socket
 import subprocess
@@ -344,6 +345,43 @@ def main() -> int:
         _c4, _h4, home2 = get_full(base + "/")
         c.ok("下载报告" in home2 and "打开报告" in home2,
              "★ 页面上两个按钮都在（打开 = 看，下载 = 存）")
+
+        print()
+        print(BAR)
+        print("⑧ 界面：校徽 / 水印 / 页脚 / 逐字吐字")
+        print(BAR)
+        _uri = re.search(r'--seal:url\("data:image/png;base64,([^"]+)"\)', home2)
+        c.ok(_uri is not None and len(_uri.group(1)) > 8000,
+             "★ 校徽真的内嵌进去了（不是空占位）",
+             f"{len(_uri.group(1)) if _uri else 0} 字符")
+        c.ok(home2.count("data:image/png;base64,") == 1,
+             "★ 校徽整页只有一份（走 CSS 变量 --seal 复用）",
+             str(home2.count("data:image/png;base64,")))
+        c.ok('class="seal"' in home2 and 'class="wm"' in home2,
+             "页头一枚校徽 + 背景一枚水印（同一张图）")
+        c.ok("河海大学" in home2, "页头/页脚署了学校名")
+        # 逐字吐字：日志必须先攒进缓冲区再按帧放，不能再整行贴上去（那正是"一段一段"）
+        c.ok("function rPush(" in home2 and "function rTyping(" in home2,
+             "★ 实时产出是攒进缓冲逐字放（rPush / rTyping）")
+        c.ok("el.textContent += l + NL" not in home2,
+             "★ 没有残留「整行直接贴上去」的老写法")
+        c.ok("prefers-reduced-motion" in home2,
+             "尊重系统「减少动态效果」：那种情况下不逐字、直接铺")
+        # 传统进度条：底槽 + 填充 + 百分比，跟着状态走
+        c.ok('id="rbar"' in home2 and 'id="rbarfill"' in home2 and 'id="rpct"' in home2,
+             "★ 报告卡片有总进度条（底槽 + 填充 + 百分比）")
+        c.ok('role="progressbar"' in home2,
+             "进度条带无障碍语义（role=progressbar）")
+        c.ok("function rSetBar(" in home2 and "rSetBar(st);" in home2,
+             "★ 进度条随状态更新（rPaint 里调 rSetBar）")
+        # 有输出却停在 0% 的回归：第一步必须是**开头的准备工序**（同步脚手架 / 比数据新鲜度），
+        # 因为那段时间就在刷输出；并且本步内要随输出蠕动，不能只等步骤跳变。
+        _c5, _h5, js5 = get_full(base + "/report/status?since=0")
+        _labs = (json.loads(js5).get("stages") or [])
+        c.ok(len(_labs) == 7 and "环境自检" in _labs[0],
+             "★ 进度条 7 步：第一步是开头的准备工序（否则有输出却显示 0%）", str(_labs))
+        c.ok("rStageLines" in home2 and "Math.exp" in home2,
+             "★ 进度条在本步内随「输出量 / 耗时」蠕动（不只是步骤跳变）")
 
         print()
         print(BAR)

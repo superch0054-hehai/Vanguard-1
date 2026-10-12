@@ -297,7 +297,10 @@ def _verdict_block(c: Ctx, key: str) -> str:
     于是永远匹配不上、整段输出成"相关维度数据本次未取得"（S41C 实测）。
     """
     dims = c.d.get("dimension_summary") or []
-    hit = [d for d in dims if key in str(d.get("name"))]
+    # 没数的维度不进结论句（magnitude 以"（"开头 = 数据未到/暂不统计）——
+    # 否则 B7 扩维度后，S41 的结论句会混进「容量衰减速率：—（（1C 段未开始…））」这种空行。
+    hit = [d for d in dims if key in str(d.get("name"))
+           and not str(d.get("magnitude") or "").startswith("（")]
     v = c.d.get("verdict") or "基本相当"
     if hit:
         body = "；".join(f"{d.get('name')}：{d.get('direction')}（{d.get('magnitude')}）"
@@ -468,7 +471,7 @@ def main() -> int:
     pkg = Path(args.package).resolve()
     only = [x.strip() for x in args.only.split(",")] if args.only else None
     n, skipped = compose(pkg, args.mode, only, force=args.force)
-    print(f"合成 {n} 段" + (f"，跳过已有 {len(skipped)} 段" if skipped else ""))
+    print(f"  ✓ 程序正文与最新数据对齐（{n} 段）" + (f"，沿用 {len(skipped)} 段" if skipped else ""))
     return 0
 
 

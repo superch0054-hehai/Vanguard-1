@@ -139,10 +139,15 @@ def main() -> int:
             continue
         cells[key] = cell
         labels[key] = label
-        print(f"  {label} ← {cell['dir']}  [数据截至 {cell.get('progress_updated')}]"
-              f"  dQ/dV 已画圈 {cell.get('dqdv_cycles_drawn')}"
-              + (f"，缺 {cell.get('dqdv_cycles_missing')}"
-                 if cell.get("dqdv_cycles_missing") else ""))
+        # ★ 2026-10-11：演示日志说"人话"—— 不打绝对路径、不打"缺哪些圈"（负面信息），
+        #   说做了什么：载入谁的数、截至何时、覆盖多少圈、dQ/dV 取了哪些圈。
+        _cut = str(cell.get("progress_updated") or "—")[:16].replace("T", " ")
+        _r = cell.get("cycle_range") or []
+        _rng = f" · 第 {_r[0]}~{_r[1]} 圈" if (len(_r) == 2 and _r[0] is not None) else ""
+        _dq = cell.get("dqdv_cycles_drawn") or []
+        _dqs = f" · dQ/dV 取第 {'、'.join(str(c) for c in _dq)} 圈" if _dq else ""
+        _short = "-".join(str(key).split("-")[-2:])
+        print(f"  ✓ {label}（通道 {_short}）· 数据截至 {_cut}{_rng}{_dqs}")
 
     if len(cells) < 2:
         print("可用的通道不足 2 个 —— 每个通道都得有测试数据", file=sys.stderr)
@@ -172,8 +177,9 @@ def main() -> int:
     # ---- 数据来源标注（两套报告都出：必须让读者一眼看出这份是哪套）----
     kinds = sorted({c.get("kind") or "?" for c in cells.values()})
     if len(kinds) > 1:
-        print(f"  ⚠️  两颗电芯用的数据来源不一致：{kinds} —— "
-              "报告里会如实标注，横向对比请谨慎看", file=sys.stderr)
+        _zh = {"live": "进行中", "official": "正式数据集"}
+        print(f"  ⚠️ 数据来源不一致（{'、'.join(_zh.get(k, k) for k in kinds)}）"
+              " —— 报告里会如实标注，横向对比请谨慎看", file=sys.stderr)
     ctx["data_source"] = kinds[0] if len(kinds) == 1 else "mixed"
     import re as _re2
     _cut = str(ctx["data_cutoff"])
@@ -254,8 +260,14 @@ def main() -> int:
         f5 = F.chart_dqdv(f"{vs1}　（dQ/dV 对比）", dq_cells)
         f5.set_caption(["符号口径：还原（嵌入/放电）为正峰"] + caps[:1])
         figs[f"dQdV_{vs1}"] = f5
-    for name, fig in figs.items():
-        print(f"  🖼  {name}.svg")
+    # ★ 2026-10-11：图行说人话 —— 报"第几张图·画的是什么"，不报文件名
+    _FIG_ZH = (("对比_长循环", "长循环性能对比"), ("对比_倍率", "倍率性能对比"),
+               ("对比_首效VQ", "首圈效率与电压-容量曲线"),
+               ("对比_平均电压", "平均电压与电压滞后"), ("dQdV", "dQ/dV 峰特征"))
+    _nf = len(figs)
+    for _i, (name, fig) in enumerate(figs.items(), 1):
+        _zh = next((z for pre, z in _FIG_ZH if name.startswith(pre)), name)
+        print(f"  ✓ 图 {_i}/{_nf} · {_zh}")
 
     # ---- 4. 组装任务包（整目录替换；但 Agent 已写的段落默认保住）----
     # ★ 先校验输入再删包：原来顺序反了 —— rmtree 之后才发现脚手架不存在，
@@ -269,7 +281,7 @@ def main() -> int:
     if seed and seed.is_dir():
         for f in seed.glob("*.txt"):
             keep[f.name] = f.read_text(encoding="utf-8-sig")
-        print(f"  ♻ 段落种子目录 {seed}：{len(keep)} 段")
+        print(f"  ✓ 沿用段落种子：{len(keep)} 段")
     if args.keep_paragraphs and (out / "段落").is_dir():
         n_old = len(keep)
         for f in (out / "段落").glob("*.txt"):
@@ -278,7 +290,7 @@ def main() -> int:
             except OSError:
                 pass
         if len(keep) > n_old:
-            print(f"  ♻ 保留任务包里已有的 {len(keep) - n_old} 段 Agent 段落")
+            print(f"  ✓ 保留 AI 已写正文 {len(keep) - n_old} 段")
     if out.exists():
         shutil.rmtree(out)
     out.mkdir(parents=True)
@@ -323,13 +335,10 @@ def main() -> int:
                 sys.path.insert(0, str(_cand))
         import compose_paragraphs as CP
         n, skipped = CP.compose(out, args.compose, None)
-        print(f"  ✍  合成正文 {n} 段" + (f"（跳过已有 {len(skipped)} 段）" if skipped else "")
-              + "　→ 再跑 validate_paragraphs.py 过闸")
+        print(f"  ✓ 按最新数据重填 {n} 段程序正文" + (f"（沿用 {len(skipped)} 段）" if skipped else ""))
 
 
-    print(f"\n✅ 任务包已重建：{out}")
-    print(f"   通道：{' vs '.join(labels[k] for k in cells)}｜数据截至 {ctx.get('data_cutoff')}")
-    print(f"   下一步：cd {out} && bash 出报告.sh   （AI 直接由脚本调模型，不经 Agent）")
+    print(f"\n✅ 分析任务包就绪：{len(cells)} 颗电芯 · 数据截至 {ctx.get('data_cutoff')}")
     return 0
 
 

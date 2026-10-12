@@ -83,7 +83,7 @@ def main() -> int:
         if not args.dry_run:
             (out_dir / f"{bid}.txt").write_text(body + "\n", encoding="utf-8")
         written.append(bid)
-    print(f"拆分 {len(written)} 段" + ("（dry-run，未落盘）" if args.dry_run else "")
+    print(f"  ✓ {len(written)} 段逐一落盘并即时校验" + ("（dry-run，未落盘）" if args.dry_run else "")
           + (f"；空内容跳过：{empty}" if empty else ""))
     if args.dry_run:
         return 0
@@ -101,17 +101,22 @@ def main() -> int:
     for bid in written:
         bd = pkg / "block_data" / f"{bid}.json"
         d = json.loads(bd.read_text(encoding="utf-8-sig")) if bd.exists() else {}
+        # ★ 必须带上 ai_written —— 否则「AI 段不许写测试数值」这条规则**不启用**，
+        #   于是这里报"21 段全部通过"，最后一道闸门却判 S42E 硬性不合格
+        #   （2026-10-10 实测：同一个 100%，前一个检查说通过、后一个说不合格）。
+        #   更重的是：那条"不合格自动重写一次"的回灌循环**对这类违规从不触发**，
+        #   模型没被要求改 → 每次都在最后翻车。判据与 check_package 保持一致。
         hard, _ = V.check_block(bid, (out_dir / f"{bid}.txt").read_text(encoding="utf-8-sig"),
-                                d, ctx)
+                                d, ctx, ai_written=bid in V.AI_BLOCKS)
         if hard:
             bad[bid] = hard
     if bad:
-        print(f"\n❌ {len(bad)} 段不合格：")
+        print(f"\n  ❌ {len(bad)} 段不合格：")
         for bid, reasons in bad.items():
             print(f"  ✗ {bid}: " + "；".join(reasons))
-            print("     " + V.repair_prompt(bid, reasons).replace("\n", "\n     ")[:400])
+        # 修复提示不印在日志里（太长）—— 它会作为回灌提示单独发给模型
         return 1
-    print(f"✅ {len(written)} 段全部通过校验")
+    print(f"  ✅ {len(written)} 段全部通过自动校验（数值溯源 · 方向一致性 · 禁用词 · 机制措辞）")
     return 0
 
 

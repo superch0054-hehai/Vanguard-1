@@ -162,6 +162,105 @@ def test_validator(c: Checker) -> None:
 
 
 
+def test_placeholder_gate(c: Checker) -> None:
+    """占位闸门：判据只许有一处，且「验不了」绝不能当成「通过」。
+
+    这一套源自 2026-10-10 的实测事故：闸门自己 `grep '数据不足'` 判占位，结果两头都错 ——
+    真占位【该项数据未提供】里没有那四个字（**漏检**），模型正文"现有数据**不足以**判定"
+    却命中（**误报 exit 1**，报告被判"先别拿给人看"）。
+    """
+    sys.path.insert(0, str(SCAFFOLD))
+    import validate_paragraphs as V
+
+    # ---- 判据本身：按结构（整行【…】），不再按关键词猜 ----
+    prose = "现有数据不足以判定实验变量带来了显著的性能提升，需以平行样品复测确认。"
+    c.ok(not V.is_placeholder(prose),
+         "★ 正文里的「现有数据不足以判定」**不算**占位（实测误报就是这一句）")
+    c.ok(V.is_placeholder("【该项数据未提供】"), "程序占位【该项数据未提供】算占位")
+    c.ok(V.is_placeholder("【图 2 未生成：对比_倍率_x.svg 缺失，需人工复核】"),
+         "★ 渲染期的【图 N 未生成…】也算（段落扫描原本看不见它）")
+    c.ok(V.is_placeholder("平均电压与极化表现分化" + chr(10) + "【该项数据未提供】"),
+         "★ 标题行 + 占位行 也算（整行是【…】即认）")
+    long_prose = (prose + "两组的线性拟合衰减速率均为（该项数据未提供）。"
+                  + "该判断需以平行样品复测确认，并对照个体波动范围。")
+    c.ok(not V.is_placeholder(long_prose),
+         "★ 长正文里顺带提一句「（该项数据未提供）」不算占位"
+         "（否则 S31C 那种既缺数据又抄指令的段落会整段溜过）")
+
+    # ---- --scan 的对外契约：.sh 只认这几行，取不到就是「没验成」 ----
+    def run_scan(pkg: Path) -> tuple[int, str]:
+        r = subprocess.run([sys.executable, "validate_paragraphs.py", "--scan",
+                            "--package", str(pkg)],
+                           cwd=str(SCAFFOLD), capture_output=True, text=True,
+                           encoding="utf-8")
+        return r.returncode, (r.stdout or "") + (r.stderr or "")
+
+    pkg = TMP / "scan_pkg"
+    shutil.rmtree(pkg, ignore_errors=True)
+    (pkg / "段落").mkdir(parents=True)
+    (pkg / "block_data").mkdir()
+    (pkg / "global_context.json").write_text("{}", encoding="utf-8")
+    (pkg / "段落" / "S35C.txt").write_text(prose, encoding="utf-8")
+    rc, out = run_scan(pkg)
+    c.ok(rc == 0 and "PLACEHOLDERS=0" in out and "HARD=0" in out,
+         "干净任务包 → PLACEHOLDERS=0 且 HARD=0（S35C 那种正文不该再被误报）", out.strip())
+
+    (pkg / "段落" / "S42A.txt").write_text("【该项数据未提供】", encoding="utf-8")
+    rc, out = run_scan(pkg)
+    c.ok("PLACEHOLDERS=1" in out and "PLACEHOLDER_BLOCKS=S42A" in out,
+         "★ 真占位能被抓到，并报出是哪一段", out.strip())
+    (pkg / "段落" / "S42A.txt").unlink()
+
+    # 缺 block_data / global_context → HARD=? ：.sh 必须据此拒绝，而不是当成 0
+    (pkg / "global_context.json").unlink()
+    rc, out = run_scan(pkg)
+    c.ok("HARD=?" in out, "★ 缺 global_context → HARD=?（让闸门能区分「通过」与「没验成」）",
+         out.strip())
+
+    # 连 段落/ 都没有 → 不给任何哨兵行（.sh 靠这个判定失败）
+    empty = TMP / "scan_empty"
+    shutil.rmtree(empty, ignore_errors=True)
+    empty.mkdir(parents=True)
+    rc, out = run_scan(empty)
+    c.ok(rc != 0 and "PLACEHOLDERS=" not in out,
+         "★ 没有 段落/ → 非零退出且**不给哨兵行**（没验成 != 通过）", f"rc={rc} {out.strip()}")
+
+    # ---- 闸门脚本本身：不许再自己 grep 中文判据 ----
+    sh_src = (SCAFFOLD / "换通道出报告.sh").read_text(encoding="utf-8")
+    c.ok("validate_paragraphs.py --scan" in sh_src, "★ 闸门改问 --scan（判据唯一出处）")
+    c.ok("grep -l '数据不足'" not in sh_src,
+         "★ 闸门里不再残留 `grep '数据不足'`（那是误报+漏检的根源）")
+    c.ok('if [ -z "${ph_cnt:-}" ]' in sh_src,
+         "★ 闸门要求必须拿到哨兵行：拿不到就报错，而不是默认通过")
+    c.ok('[ "$hard" = "?" ]' in sh_src,
+         "★ 闸门把 HARD=? 当成「没验成」，直接卡住（不当成 0）")
+    c.ok("成品自检" in sh_src and "【[^】]*】" in sh_src,
+         "★ 闸门还有一道渲染后的成品自检（扫成品 HTML 里的【…】—— 段落扫描看不见图没生成）")
+    # ---- AI 段的"不许写测试数值"只在 ai_written=True 时生效 ----
+    # split_batch 曾经漏传这个参数（2026-10-10 实测）：它的"即时校验"说 21 段全过，
+    # 最后一道闸门却判 S42E 硬性不合格 —— 同一个 100%。后果是"不合格自动重写"的回灌
+    # 循环对这类违规**从不触发**，模型没被要求改，于是每次都在最后翻车。
+    _t = "以上推断需以平行样品复测确认，稳态 CE 贴近 100% 等尚非直接证据（属推测）。"
+    _d = {"figure_ref": "图 5", "number": 100.0}
+    _h_ai, _ = V.check_block("S42E", _t, _d, {}, ai_written=True)
+    _h_no, _ = V.check_block("S42E", _t, _d, {}, ai_written=False)
+    c.ok(any("测试数值" in h for h in _h_ai),
+         "★ ai_written=True：抓出 AI 段里的 100", str(_h_ai))
+    c.ok(not any("测试数值" in h for h in _h_no),
+         "★ ai_written=False：这条规则不启用 → 同一个 100% 被放过（漏传就是这样静默通过的）",
+         str(_h_no))
+    sb = (SCAFFOLD / "split_batch.py").read_text(encoding="utf-8")
+    c.ok("ai_written=bid in V.AI_BLOCKS" in sb,
+         "★ split_batch 的即时校验也带 ai_written（与 check_package 同判据）")
+
+    # ---- 内层脚本不许自己当判官 ----
+    inner = (SCAFFOLD / "出报告.sh").read_text(encoding="utf-8")
+    _val = next((ln for ln in inner.splitlines() if "validate_paragraphs.py" in ln), "")
+    c.ok(_val and "|| exit" not in _val,
+         "★ 内层校验失败时**不中断**（判定权归外层闸门：中断会让成品根本不渲染）",
+         _val.strip())
+
+
 def test_compose(c: Checker) -> None:
     """填空式合成器：**程序填的全篇必须能过自己的校验器**（否则等于把错误写进报告）。
 
@@ -377,6 +476,7 @@ def main() -> int:
     test_empty_newest_test(c)
     test_docs_match_scripts(c)
     test_validator(c)
+    test_placeholder_gate(c)
 
     print(BAR)
     print("① 合成数据 → report_build 重建任务包")
@@ -399,6 +499,9 @@ def main() -> int:
     slots = sorted(set(re.findall(r"<!--FIGURE:(\d+)-->", tmpl)), key=int)
     c.ok(slots == ["1", "2", "3", "4", "5"],
          "★ 模板有 FIGURE:1~5 五个图位（图 6 已取消）", str(slots))
+    tslots = sorted(set(re.findall(r"<!--TABLE:(\d+)-->", tmpl)), key=int)
+    c.ok(tslots == [str(i) for i in range(1, 10)],
+         "★ 模板表槽位 = 1~9（原表 3 已删、顺延补号无缺口，B4）", str(tslots))
     # ★ 样式块必须真的把 CSS 包在里面：2026-10-03 起模板里多出一对**空的**
     #   `<style></style>`，CSS 被挡到正文里 —— 报告打开就是满屏样式文字。
     #   因为谁也没直接打开 HTML 看，一直潜伏到 10-09 才被发现。
@@ -440,8 +543,18 @@ def main() -> int:
     c.ok(bool(ctx.get("data_cutoff")), "数据截止时间写进上下文", str(ctx.get("data_cutoff")))
     # （原来这里断言包里的 任务说明.md 日期是动态的；随 Agent 壳已删除。）
     win = ctx["test_conditions"]["voltage_window"]
-    c.ok(win and "3.31" not in win,
-         "★ 电压窗口从数据现算（写死的 3.31 V 是别的实验的窗口，会张冠李戴）", str(win))
+    c.ok(win and "3.31" not in win and "2.0" in win,
+         "★ 电压窗口 = 设定窗口 0.01~2.0 V（修改清单 B1；实测范围不再冒充设定窗口）",
+         str(win))
+    _tc = ctx["test_conditions"]
+    c.ok(_tc.get("temperature") == "28 ℃",
+         "★ 环境温度 = 28 ℃（修改清单 B1，用户批注值）", str(_tc.get("temperature")))
+    c.ok(_tc.get("nominal_specific_capacity") and "300" in _tc["nominal_specific_capacity"],
+         "★ 硬碳标称比容量 = 300 mAh/g（修改清单 B1）")
+    c.ok(_tc.get("formation") == "0.1C × 3 圈",
+         "★ 化成活化 = 0.1C × 3 圈（修改清单 B2）", str(_tc.get("formation")))
+    c.ok("78" in (_tc.get("rate_program") or ""),
+         "★ 倍率程序 = 0.2C→5C→0.2C 共 78 圈（修改清单 B2）", str(_tc.get("rate_program")))
     c.ok(win and win.startswith("0.0") or win and win.startswith("1."),
          "电压窗口形如「x.xx~x.xx V」", str(win))
     s34a = json.loads((OUT / "block_data" / "S34A.json").read_text(encoding="utf-8-sig"))
@@ -536,6 +649,64 @@ def main() -> int:
     c.ok(not left, "★ 没有残留的占位符", str(left))
     c.ok("STD" in html and "1%Q④" in html, "样品名进了报告")
     c.ok("S31A 的合成段落" in html, "Agent 写的段落进了报告")
+
+    # ---- 2026-10-10 修改清单 B 部分验收（B1~B9）----
+    c.ok("**" not in html, "★ 全文无裸 **（B8：加粗符号不许漏进正文）")
+    for _key in ("cell_type", "counter_electrode", "current_collector",
+                 "electrolyte_control", "nominal_specific_capacity"):
+        c.ok(_key not in html, f"★ 表内无英文程序字段名：{_key}（B3/B9）")
+    c.ok("环境（未提供）" not in html and "标称比容量取（未提供）" not in html
+         and "（（未提供））" not in html,
+         "★ B1/B2：2.2/2.3 的三处「（未提供）」不再出现（表格里数据真缺的仍如实标）")
+    c.ok("平均库伦效率 / %" in html and "保持率-基线" not in html,
+         "★ 长循环表删「保持率-基线」、换「平均库伦效率」（B6）")
+    c.ok("容量保持率（基线第 4 圈→最新）" in html and "（数据未到）" in html
+         and "稳态平均库伦效率" in html,
+         "★ 全维度对比表扩维度：没到的保留行标「（数据未到）」（B7）")
+    c.ok("核心测试工步与数据处理口径" not in html and "表 10" not in html,
+         "★ 原表 3 已删、表号顺延无缺口（B4）")
+    c.ok("None 为工作电极" not in html and "**" not in html,
+         "★ 正文不再出现字面 None / 裸 **（B9/B8）")
+    c.ok("28 ℃" in html and "0.01~2.0 V" in html,
+         "★ 2.2 的设定条件进了正文（B1）")
+    # B9 的**两个分支**单独钉住（假包走的是"体系齐全"分支，收敛分支在 html 里看不到）：
+    sys.path.insert(0, str(SCAFFOLD))
+    import render as _R
+    _ctx2 = {"system": {"cell_type": "扣式电池", "chemistry": None,
+                        "working_electrode": None, "counter_electrode": None,
+                        "separator": None, "current_collector": None,
+                        "electrolyte_control": None, "electrolyte_experimental": None,
+                        "ions": None},
+             "variable": {"type": "电解液添加剂（PBSF，1 wt%）",
+                          "control_short": "长循环实验样",
+                          "experimental_short": "长循环对比样",
+                          "experimental_dosage": "1 wt%"},
+             "test_conditions": {"temperature": "28 ℃", "humidity": None,
+                                 "voltage_window": "0.01~2.0 V（设定窗口）",
+                                 "nominal_specific_capacity": "300 mAh·g⁻¹",
+                                 "formation": "0.1C × 3 圈",
+                                 "rate_program": "0.2C→5C→0.2C，每档 6 圈、共 13 档 78 圈",
+                                 "long_cycle_rate": "1C 恒流充放电，自第 4 圈起",
+                                 "retention_baseline_cycle": 4}}
+    _f21 = _R.chapter2_frag("S21A", _ctx2)
+    c.ok("None" not in _f21 and "待实验室提供" in _f21 and "实验组" in _f21,
+         "★ B9：体系缺信息时 S21A 收敛为「待实验室提供」，绝不印字面 None", _f21[:120])
+    _f22 = _R.chapter2_frag("S22", _ctx2)
+    c.ok("28 ℃" in _f22 and "0.01~2.0 V" in _f22 and "（未提供）" not in _f22
+         and "待实验室提供" in _f22,
+         "★ B1/A2：S22 设定条件齐全、湿度占位为「待实验室提供」", _f22[:120])
+    _f23 = _R.chapter2_frag("S23A", _ctx2)
+    c.ok("0.1C × 3 圈" in _f23 and "（（" not in _f23,
+         "★ B2：工步参数进正文且不再出现「（（…））」双括号", _f23[:120])
+    # B5 配色：按**角色名**判（实验样红/对比样蓝），不再按传入顺序
+    import figures as _F2
+    c.ok(_F2.cmp_color("长循环实验样", 0) == _F2.EXP_COLOR
+         and _F2.cmp_color("长循环对比样", 1) == _F2.CTL_COLOR
+         and _F2.cmp_color("STD", 0) == _F2.CMP_COLORS[0],
+         "★ 配色按角色名：实验样=红、对比样=蓝，判不出角色再按座次（B5）")
+    _lc = (OUT / "图" / WANT_FIGS[0]).read_text(encoding="utf-8")
+    c.ok(_F2.EXP_COLOR in _lc and _F2.CTL_COLOR in _lc,
+         "★ 图 1 里两种角色色都在")
 
     # dQ/dV 逐圈图：圈号说明走图注，**不许**用图内说明框（说明框固定左上角，
     # 会压住 dQ/dV 的峰 —— 渲染出来一眼可见）

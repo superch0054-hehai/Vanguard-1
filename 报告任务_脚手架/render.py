@@ -127,11 +127,26 @@ def bd(bid):
     return json.loads(p.read_text(encoding="utf-8-sig")) if p.exists() else {}
 
 
+def _is_exp(label: str) -> bool:
+    """是不是实验样 —— 按**角色名**判（本批样品名就是角色名，2026-10-09 拍板）。
+
+    ⚠ 不能用 ctx.variable 的 control_/experimental_ 前缀判：那两个键是"对①的第一颗/
+    第二颗"的意思，本批第一颗恰好叫"长循环实验样"—— 按键名判会**正好判反**。
+    """
+    return "实验" in str(label or "")
+
+
+def _elyte_of(label: str, dose: str) -> str:
+    """该样品的电解液体系（2.1 正文与表 2 共用同一个实现 —— 别再各写一份）。"""
+    return (f"基础电解液 + 添加剂（{dose}，实验组）" if _is_exp(label)
+            else "基础电解液（未加添加剂，对照组）")
+
+
 def chapter2_frag(bid, ctx):
     """第 2 章由**程序**按配置生成（模板里就是这么写的：不经模型）。
 
-    体系/工步/分组信息来自协会《…第二版》报告，同一体系（STD vs 1% Q④）时才有；
-    换别的样品时如实写"待实验室补充"，不张冠李戴。
+    设定条件（温度/工步等）2026-10-10 起由用户给定（修改清单 B1/B2）；
+    体系信息（电极/隔膜/电解液配方）还没给 —— 如实写"待实验室提供"，不张冠李戴。
     """
     sysi, tc = ctx.get("system") or {}, ctx.get("test_conditions") or {}
     var = ctx.get("variable") or {}
@@ -139,30 +154,50 @@ def chapter2_frag(bid, ctx):
     if not known:
         return ('<div class="note">第 2 章与附录由程序按配置生成'
                 "（本对样品的体系信息未提供，待实验室补充）</div>")
+    dose = var.get("experimental_dosage") or "1 wt%"
+
+    _ca = var.get("control_short") or "A"
+    _cb = var.get("experimental_short") or "B"
+    have_sys = all(sysi.get(k) for k in ("working_electrode", "counter_electrode",
+                                         "separator", "current_collector",
+                                         "electrolyte_control", "electrolyte_experimental"))
+    if have_sys:
+        s21a = ("本次实验采用 {cell_type}：{working_electrode} 为工作电极，"
+                "{counter_electrode} 为参比与对电极，隔膜为 {separator}，"
+                "集流体为 {current_collector}。两组电池的差别仅在电解液："
+                "{ca} 组为 {ea}；{cb} 组为 {eb}。").format(
+                    cell_type=sysi.get("cell_type") or "扣式电池",
+                    working_electrode=sysi["working_electrode"],
+                    counter_electrode=sysi["counter_electrode"],
+                    separator=sysi["separator"],
+                    current_collector=sysi["current_collector"],
+                    ca=_ca, cb=_cb, ea=_elyte_of(_ca, dose), eb=_elyte_of(_cb, dose))
+    else:
+        # ★ 2026-10-10 B9：体系信息没给时**不许把 None 印进正文**（实测出现过"None 为工作电极"）。
+        #   能说的只有电池类型 + 两组差别在电解液（变量本身是用户已确认的）。
+        s21a = ("本次实验采用{cell_type}。化学体系、工作电极、参比/对电极、隔膜与集流体"
+                "等体系信息待实验室提供。两组电池的差别仅在电解液："
+                "{ca} 组为 {ea}；{cb} 组为 {eb}。").format(
+                    cell_type=sysi.get("cell_type") or "扣式电池",
+                    ca=_ca, cb=_cb, ea=_elyte_of(_ca, dose), eb=_elyte_of(_cb, dose))
     txt = {
-        "S21A": ("本次实验采用 {cell_type}：{working_electrode} 为工作电极，"
-                 "{counter_electrode} 为参比与对电极，隔膜为 {separator}，"
-                 "集流体为 {current_collector}。两组电池的差别仅在电解液："
-                 "{control_short} 组为 {electrolyte_control}；{experimental_short} 组为 "
-                 "{electrolyte_experimental}。").format(
-                     control_short=var.get("control_short", "A"),
-                     experimental_short=var.get("experimental_short", "B"), **sysi),
+        "S21A": s21a,
         "S21B": ("硬碳极片与电池按标准扣电流程制备：电极浆料制备 → 涂布于集流体 → "
                  "真空干燥 → 辊压 → 切片（Φ11.3 mm）→ 手套箱内组装扣电壳 → "
                  "注入电解液 → 封口静置 12 h（本节流程口径与协会报告一致）。"),
-        "S22": ("测试使用 Neware 电池测试系统，环境 {temperature}、湿度 {humidity}；"
+        "S22": ("测试使用 Neware 电池测试系统，环境温度 {temperature}、湿度 {humidity}；"
                 "电压窗口为 {voltage_window}，硬碳标称比容量取 {nominal}，"
                 "截止条件为电压截止。").format(
-                    temperature=tc.get("temperature") or "（未提供）",
-                    humidity=tc.get("humidity") or "（未提供）",
-                    voltage_window=tc.get("voltage_window") or "（未提供）",
-                    nominal=tc.get("nominal_specific_capacity") or "（未提供）"),
-        "S23A": ("核心测试工步分四阶段：静置 → 化成活化（{formation}）→ "
-                 "倍率性能测试（{rate_program}）→ 长循环测试（{long_cycle_rate}）。"
-                 "本批数据的实测电流见 3.1 节的说明。").format(
-                     formation=tc.get("formation") or "（未提供）",
-                     rate_program=tc.get("rate_program") or "（未提供）",
-                     long_cycle_rate=tc.get("long_cycle_rate") or "（未提供）"),
+                    temperature=tc.get("temperature") or "（待实验室提供）",
+                    humidity=tc.get("humidity") or "（待实验室提供）",   # A2：湿度暂占位
+                    voltage_window=tc.get("voltage_window") or "（待实验室提供）",
+                    nominal=tc.get("nominal_specific_capacity") or "（待实验室提供）"),
+        "S23A": ("核心测试工步分四阶段：静置 → 化成活化（{formation}，小电流活化以"
+                 "形成初始 SEI 并评估首效）→ 倍率性能测试（{rate_program}）→ "
+                 "长循环测试（{long_cycle_rate}）。本批数据的实测电流见 3.1 节的说明。").format(
+                     formation=tc.get("formation") or "（待实验室提供）",
+                     rate_program=tc.get("rate_program") or "（待实验室提供）",
+                     long_cycle_rate=tc.get("long_cycle_rate") or "（待实验室提供）"),
         "S23B": ("数据处理口径：容量保持率基线统一取第 {base} 圈（化成后首个 1C 循环）；"
                  "清洗规则为剔除末圈被截断的循环与库伦效率持续超过 100.5% 的异常尾段。"
                  "本批数据为每条件 1 颗电芯（n=1），未做平行样均值与误差棒。").format(
@@ -170,7 +205,7 @@ def chapter2_frag(bid, ctx):
         "S24A": ("实验分为对照组与实验组，每组分别开展长循环与倍率两个测试项目，"
                  "共四个样品编号（STD-1C、STD-rate、1%Q④-1C、1%Q④-rate）。"
                  "原设计每个条件制备 3 颗平行样，本次分析实际使用每条件 1 颗代表电芯 —— "
-                 "**本报告只用了其中一对通道的数据**，其余通道待采集后并入。"),
+                 "本报告只用了其中一对通道的数据，其余通道待采集后并入。"),
         "S24B": ("因此后续所有差异均按「方向 + 幅度 + 是否超出个体波动范围」表述，"
                  "不做显著性判定。"),
     }
@@ -226,70 +261,104 @@ def render(ctx, labels):
         out = out.replace("<!--BLOCK:" + bid + "-->", frag_for(bid))
 
     # ---- 表格位（程序按数据渲染；缺数据如实标注）----
-    # 表号与《协会第二版报告》对齐：1 体系 / 2 分组 / 3 测试条件 / 4 长循环 /
-    # 5 倍率 / 6 首圈 / 7 平均电压·ΔV·EE / 8 dQ/dV 峰 / 9 全维度 / 10 变量—性能
+    # ★ 2026-10-10 修改清单 B3/B4/B6/B9：
+    #   · 表 1 行名改中文，整片"（未提供）"收敛成一行（B9）
+    #   · 表 2 重做为四列业务表：样品编号|电解液体系|测试项目|平行样品数（B3）
+    #   · 原表 3（工步与口径）整表删除 —— 与 2.2/2.3 正文重复（B4），
+    #     其后表格**顺延补号**（原 4→3 … 原 10→9），报告里不留缺口
+    #   · 长循环表删"保持率-基线"（恒 100.0 无信息量），换"平均库伦效率"（B6）
     b31a, b31b, b33a, b32a = bd("S31A"), bd("S31B"), bd("S33A"), bd("S32A")
     b32c, b32d, b34a, b35a = bd("S32C"), bd("S32D"), bd("S34A"), bd("S35A")
+    b31c = bd("S31C")
     tables = {}
-    tables[1] = table_html(1, "测试电池体系配置", ["项", "内容"],
-                           [[k, na_cell(v)] for k, v in (ctx.get("system") or {}).items()])
-    tables[2] = table_html(2, "实验分组与变量", ["项", "内容"],
-                           [[k, na_cell(v)] for k, v in (ctx.get("variable") or {}).items()])
-    tables[3] = table_html(3, "核心测试工步与数据处理口径", ["项", "内容"],
-                           [[k, na_cell(v)] for k, v in (ctx.get("test_conditions") or {}).items()])
-    rows4 = []
+    # 表 1 体系配置：中文行名；缺的行收敛成一行，不整表刷"（未提供）"
+    _SYS_ZH = [("cell_type", "电池类型"), ("chemistry", "化学体系"),
+               ("working_electrode", "工作电极"), ("counter_electrode", "参比/对电极"),
+               ("separator", "隔膜"), ("current_collector", "集流体"),
+               ("electrolyte_control", "对照组电解液"),
+               ("electrolyte_experimental", "实验组电解液"), ("ions", "离子体系")]
+    _sys_rows, _miss = [], []
+    for _k, _zh in _SYS_ZH:
+        _v = (ctx.get("system") or {}).get(_k)
+        if _v:
+            _sys_rows.append([_zh, na_cell(_v)])
+        else:
+            _miss.append(_zh)
+    if _miss:
+        _sys_rows.append(["体系信息（" + "、".join(_miss) + "）", "体系信息待实验室提供"])
+    tables[1] = table_html(1, "测试电池体系配置", ["项", "内容"], _sys_rows)
+
+    # 表 2 实验分组与变量：四列业务表（B3），行名列名全中文，平行样数如实写
+    _var = ctx.get("variable") or {}
+    _dose = _var.get("experimental_dosage") or "1 wt%"
+    _rows2 = []
+    for _proj, _pair in (
+            ("长循环（1C 恒流充放电，自第 4 圈起）",
+             (_var.get("control_short"), _var.get("experimental_short"))),
+            ("倍率（0.2C→5C→0.2C，每档 6 圈）",
+             (_var.get("pair2_control_short"), _var.get("pair2_experimental_short")))):
+        for _lbl in _pair:
+            if _lbl:
+                _rows2.append([_lbl, _elyte_of(_lbl, _dose), _proj,
+                               "设计 3 颗 / 本次 1 颗"])
+    tables[2] = table_html(2, "实验分组与变量",
+                           ["样品编号", "电解液体系", "测试项目", "平行样品数"], _rows2)
+
+    # 表 3 长循环统计（原表 4）：删"保持率-基线"（恒 100.0），换"平均库伦效率"（B6）
+    rows3 = []
     for gname, gv in (b31a.get("groups") or {}).items():
         rb = (b31b.get("groups") or {}).get(gname, {})
-        rows4.append([gname, na_cell(gv.get("effective_cycles")),
+        ce = ((b31c.get("groups") or {}).get(gname) or {}).get("CE_steady_mean")
+        rows3.append([gname, na_cell(gv.get("effective_cycles")),
                       na_cell(gv.get("fade_rate_linear_fit")),
-                      na_cell(rb.get("retention_baseline")),
+                      na_cell(ce, "{:.2f}"),
                       na_cell(rb.get("retention_last"))])
-    tables[4] = table_html(4, "标准化循环性能数据统计（基线为第 4 圈）",
+    tables[3] = table_html(3, "标准化循环性能数据统计（基线为第 4 圈）",
                            ["组", "有效圈数", "衰减速率 (mAh·g⁻¹·百圈⁻¹)",
-                            "保持率-基线", "保持率-最新"], rows4)
-    rows5 = []
+                            "平均库伦效率 / %", "保持率-最新"], rows3)
+    rows4 = []
     for d in (b33a.get("rate_stats") or []):
-        rows5.append([na_cell(d.get("label")), na_cell(d.get("a_mah_g"), "{:.2f}"),
+        rows4.append([na_cell(d.get("label")), na_cell(d.get("a_mah_g"), "{:.2f}"),
                       na_cell(d.get("b_mah_g"), "{:.2f}"), na_cell(d.get("diff"), "{:+.2f}")])
-    tables[5] = table_html(5, "各倍率档位放电比容量统计（每档均值）",
+    tables[4] = table_html(4, "各倍率档位放电比容量统计（每档均值）",
                            ["倍率档位", "样品 A / (mAh·g⁻¹)", "样品 B / (mAh·g⁻¹)",
                             "差值 / (mAh·g⁻¹)"],
-                           rows5 or [["（本批数据尚未进入倍率段）", "", "", ""]])
-    rows6 = []
+                           rows4 or [["（本批数据尚未进入倍率段）", "", "", ""]])
+    rows5 = []
     for gname, gv in (b32a.get("groups") or {}).items():
-        rows6.append([gname, na_cell(gv.get("discharge_sp")),
+        rows5.append([gname, na_cell(gv.get("discharge_sp")),
                       na_cell(gv.get("charge_sp")),
                       na_cell(gv.get("irreversible_sp")),
                       na_cell(gv.get("ce"), "{:.2f}")])
-    tables[6] = table_html(6, "首圈充放电容量与不可逆容量统计",
+    tables[5] = table_html(5, "首圈充放电容量与不可逆容量统计",
                            ["组", "首圈放电比容量 / (mAh·g⁻¹)", "首圈充电比容量 / (mAh·g⁻¹)",
-                            "首圈不可逆容量 / (mAh·g⁻¹)", "首次库伦效率 / %"], rows6)
-    rows7 = []
+                            "首圈不可逆容量 / (mAh·g⁻¹)", "首次库伦效率 / %"], rows5)
+    rows6 = []
     for gname, gv in (b32c.get("groups") or {}).items():
         gd = (b32d.get("groups") or {}).get(gname, {})
-        rows7.append([gname, na_cell(gv.get("avg_v_first"), "{:.4f}"),
+        rows6.append([gname, na_cell(gv.get("avg_v_first"), "{:.4f}"),
                       na_cell(gv.get("avg_v_last"), "{:.4f}"),
                       na_cell(gv.get("avg_v_fade_mv_100c"), "{:+.2f}"),
                       na_cell(gd.get("dV_mean_mv"), "{:.2f}"),
                       na_cell(gd.get("EE_first_pct"), "{:.2f}"),
                       na_cell(gd.get("EE_last_pct"), "{:.2f}"),
                       na_cell(gd.get("platform_share_last_pct"), "{:.2f}")])
-    tables[7] = table_html(7, "平均放电电压、电压滞后（ΔV）、能量效率与平台容量占比",
+    tables[6] = table_html(6, "平均放电电压、电压滞后（ΔV）、能量效率与平台容量占比",
                            ["组", "平均放电电压-首 / V", "平均放电电压-末 / V",
                             "电压衰减速率 / (mV·百圈⁻¹)", "ΔV 均值 / mV",
-                            "EE-首 / %", "EE-末 / %", "平台容量占比 / %"], rows7)
-    rows8 = []
+                            "EE-首 / %", "EE-末 / %", "平台容量占比 / %"], rows6)
+    rows7 = []
     for gname, gv in (b34a.get("groups") or {}).items():
         pk = gv.get("peak_positions", {})
-        rows8.append([gname, na_cell(pk.get("chg", {}).get("voltage_V"), "{:.3f}"),
+        rows7.append([gname, na_cell(pk.get("chg", {}).get("voltage_V"), "{:.3f}"),
                       na_cell(pk.get("dis", {}).get("voltage_V"), "{:.3f}")])
-    tables[8] = table_html(8, "dQ/dV 主峰位置（第 1 圈；峰宽/峰高/面积占比待数据）",
-                           ["组", "充电分支（脱出）主峰 / V", "放电分支（嵌入）主峰 / V"], rows8)
-    tables[9] = table_html(9, "全维度性能综合对比", ["维度", "方向", "幅度"],
+    tables[7] = table_html(7, "dQ/dV 主峰位置（第 1 圈；峰宽/峰高/面积占比待数据）",
+                           ["组", "充电分支（脱出）主峰 / V", "放电分支（嵌入）主峰 / V"], rows7)
+    tables[8] = table_html(8, "全维度性能综合对比", ["维度", "方向", "幅度"],
                            [[d.get("name", "—"), d.get("direction", "—"),
                              d.get("magnitude", "—")]
                             for d in b35a.get("dimension_summary", [])])
-    tables[10] = table_html(10, "变量—性能响应差异",
+    tables[9] = table_html(9, "变量—性能响应差异",
                             ["保持率类", "容量类", "极化类"],
                             [["（圈数尚少，幅度区间无法统计）", "", ""]])
 
@@ -360,7 +429,7 @@ def main():
     tmp = dst.with_suffix(".html.tmp")
     tmp.write_text(html, encoding="utf-8")
     os.replace(tmp, dst)
-    print("  已生成:", dst)
+    print(f"  ✓ 报告渲染完成：{dst.name}")
     return 0
 
 

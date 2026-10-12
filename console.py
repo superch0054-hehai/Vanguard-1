@@ -247,20 +247,41 @@ def latest_status_age(status: dict) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 
 CSS = """
-:root { --bg:#f7f7f5; --fg:#1f1f1f; --mut:#70706c; --line:#e3e3df;
-        --ok:#1a7f37; --warn:#9a6700; --bad:#b42318; --accent:#0b6bcb; }
+/* 配色取自河海大学校徽本身（#0D71AD，由 assets/生成校徽.py 取样得到）。
+   背景不做纯色：一层极淡的蓝→白渐变，加一枚固定的校徽水印。
+   水印只在留白处透出来 —— 卡片和表格都是实底，数字照旧好读。 */
+:root { --bg:#f7f9fc; --panel:#ffffff; --fg:#1b2430; --mut:#6b7686; --line:#e3e9f0;
+        --ok:#1a7f37; --warn:#9a6700; --bad:#b42318;
+        --accent:#0d71ad; --tint:#eaf3fa;
+        --seal:url("__SEAL__"); }
 @media (prefers-color-scheme: dark) {
-  :root { --bg:#141414; --fg:#f4f4f1; --mut:#a6a6a0; --line:#2e2e2e;
-          --ok:#3fb950; --warn:#d29922; --bad:#f85149; --accent:#58a6ff; } }
+  :root { --bg:#11161d; --panel:#171e27; --fg:#eef2f7; --mut:#9aa7b6; --line:#28323e;
+          --ok:#3fb950; --warn:#d29922; --bad:#f85149;
+          --accent:#6cb6e0; --tint:#16222e; } }
 * { box-sizing:border-box; }
-body { margin:0; padding:28px; background:var(--bg); color:var(--fg);
-       font:15px/1.65 ui-sans-serif,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif; }
-.wrap { max-width:1080px; margin:0 auto; }
-h1 { font-size:22px; margin:0 0 4px; }
-h2 { font-size:17px; margin:32px 0 10px; }
-.sub { color:var(--mut); font-size:13px; margin-bottom:22px; }
+body { margin:0; padding:0 24px 40px; background:var(--bg); color:var(--fg);
+       font:15px/1.65 ui-sans-serif,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+       background-image:linear-gradient(180deg,var(--tint) 0,transparent 460px); }
+/* 校徽水印：固定居中、纯装饰、不挡交互（pointer-events:none） */
+.wm { position:fixed; inset:0; z-index:0; pointer-events:none; opacity:.055;
+      background:var(--seal) center/620px no-repeat; }
+@media (prefers-color-scheme: dark) {
+  .wm { opacity:.10; filter:brightness(1.75) saturate(.85); } }
+.wrap { position:relative; z-index:1; max-width:1080px; margin:0 auto; }
+/* 页头品牌行：校徽 + 标题 */
+.brand { display:flex; align-items:center; gap:15px; padding:26px 0 10px; }
+.brand .seal { flex:0 0 auto; width:58px; height:58px; border-radius:10px;
+               background:var(--seal) center/contain no-repeat; }
+@media (prefers-color-scheme: dark) {
+  .brand .seal { filter:brightness(1.6) saturate(.85); } }
+.brand h1 { margin:0; }
+.brand .sub { margin:2px 0 0; }
+h1 { font-size:23px; margin:0 0 2px; letter-spacing:.01em; }
+h2 { font-size:17px; margin:34px 0 12px; padding-left:11px;
+     border-left:4px solid var(--accent); line-height:1.3; }
+.sub { color:var(--mut); font-size:13px; margin:0 0 4px; }
 .banner { background:var(--line); border-radius:8px; padding:10px 14px;
-          font-size:13px; color:var(--mut); margin-bottom:22px; }
+          font-size:13px; color:var(--mut); margin-bottom:18px; }
 /* 数据口径警告 —— 要比普通 banner 显眼，因为它标的是"这个数字别直接用"。
    文字用正常前景色（黄色正文对比度不够），靠左边框和底色提示。 */
 .banner.warn { background:color-mix(in srgb, var(--warn) 12%, transparent);
@@ -268,28 +289,52 @@ h2 { font-size:17px; margin:32px 0 10px; }
                line-height:1.75; }
 .banner.warn b { color:var(--warn); }
 .cards { display:flex; flex-wrap:wrap; gap:12px; }
-.card { flex:1 1 150px; background:var(--bg); border:1px solid var(--line);
-        border-radius:10px; padding:14px 16px; }
+.card { flex:1 1 150px; background:var(--panel); border:1px solid var(--line);
+        border-radius:12px; padding:14px 16px; box-shadow:0 1px 2px rgba(16,32,56,.05); }
 .card .k { font-size:12px; color:var(--mut); letter-spacing:.04em; }
 .card .v { font-size:24px; font-weight:600; margin-top:4px; }
+.panel { border:1px solid var(--line); border-radius:12px; padding:16px;
+         background:var(--panel); box-shadow:0 1px 2px rgba(16,32,56,.05); }
 .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)}
 table { width:100%; border-collapse:collapse; font-size:14px; }
 th,td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); }
-th { font-size:12px; color:var(--mut); font-weight:600; letter-spacing:.04em; }
-tr:hover td { background:var(--line); }
+th { font-size:12px; color:var(--mut); font-weight:600; letter-spacing:.04em;
+     background:var(--tint); }
+tbody tr:hover td { background:var(--tint); }
 a { color:var(--accent); text-decoration:none; }
 a:hover { text-decoration:underline; }
 code { background:var(--line); padding:2px 6px; border-radius:5px; font-size:13px; }
 pre { background:var(--line); padding:12px 14px; border-radius:8px; overflow-x:auto;
       font-size:12.5px; line-height:1.5; }
+/* 总进度条（传统样式：底槽 + 填充 + 右侧百分比） */
+.pwrap { display:flex; align-items:center; gap:10px; margin-top:12px; }
+.pbar { flex:1; height:10px; background:var(--line); border-radius:999px; overflow:hidden; }
+.pbar > i { display:block; height:100%; width:0; background:var(--accent);
+            border-radius:999px; transition:width .45s ease, background .3s ease; }
+.ppct { flex:0 0 auto; min-width:86px; text-align:right; font-size:12px;
+        color:var(--mut); font-variant-numeric:tabular-nums; }
+@media (prefers-reduced-motion: reduce) { .pbar > i { transition:none; } }
+/* 实时产出面板：深底等宽，逐字打出。点一下可以立刻铺完（不用等）。 */
+.log { margin-top:10px; min-height:64px; max-height:320px; overflow:auto;
+       background:#0f1720; color:#cfe3f2; padding:12px 14px; font-size:12px;
+       line-height:1.6; border-radius:8px; white-space:pre-wrap; cursor:text;
+       font-family:ui-monospace,Consolas,"Cascadia Mono",monospace;
+       border:1px solid rgba(255,255,255,.06); }
 button { font:inherit; padding:9px 16px; border-radius:8px; cursor:pointer;
-         border:1px solid var(--line); background:var(--fg); color:var(--bg); }
-button:disabled { opacity:.5; cursor:default; }
+         border:1px solid var(--accent); background:var(--accent); color:#fff; }
+button:hover:not(:disabled) { filter:brightness(1.08); }
+button:disabled { opacity:.45; cursor:default; }
 a.btn { display:inline-block; padding:9px 16px; margin:0 10px 8px 0; border-radius:8px;
-        border:1px solid var(--line); background:var(--fg); color:var(--bg);
+        border:1px solid var(--accent); background:var(--accent); color:#fff;
         text-decoration:none; font-size:14px; }
-a.btn:hover { text-decoration:none; opacity:.85; }
-a.btn.ghost { background:transparent; color:var(--fg); }
+a.btn:hover { text-decoration:none; filter:brightness(1.08); }
+a.btn.ghost { background:transparent; color:var(--accent); }
+/* 深色下 --accent 是**浅**蓝，白字压上去看不清 —— 换成深色字 */
+@media (prefers-color-scheme: dark) {
+  button, a.btn { color:#0b1a24; } }
+footer { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap;
+         margin-top:44px; padding-top:16px; border-top:1px solid var(--line);
+         color:var(--mut); font-size:12.5px; }
 .muted { color:var(--mut); font-size:13px; }
 """
 
@@ -297,7 +342,14 @@ PAGE = """<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>BatteryLab 数据控制台</title><style>{css}</style></head>
-<body><div class="wrap">{body}</div></body></html>
+<body>
+<div class="wm" aria-hidden="true"></div>
+<div class="wrap">{body}
+<footer>
+  <span>河海大学 · 电池实验室</span>
+  <span>BatteryLab 控制台 v{ver} ｜ 只读界面</span>
+</footer>
+</div></body></html>
 """
 
 
@@ -305,8 +357,17 @@ def esc(v) -> str:
     return html.escape(str(v if v is not None else ""), quote=True)
 
 
+def brand(title: str = "BatteryLab 数据控制台",
+          sub: str = "河海大学 · 电池实验室") -> str:
+    """页头：校徽 + 标题。校徽走 CSS 变量 --seal（整个页面只内嵌一份），不发额外请求。"""
+    return ('<div class="brand">'
+            '<div class="seal" role="img" aria-label="河海大学校徽"></div>'
+            f'<div><h1>{esc(title)}</h1><div class="sub">{esc(sub)}</div></div></div>')
+
+
 def page(title: str, body: str) -> bytes:
-    return PAGE.format(css=CSS, body=body).encode("utf-8")
+    return PAGE.format(css=CSS.replace("__SEAL__", seal_uri()),
+                       body=body, ver=VERSION).encode("utf-8")
 
 
 def live_progress(root: Path) -> list[dict]:
@@ -415,7 +476,7 @@ def render_home(root: Path, share_dir: Path | None, msg: str = "") -> bytes:
         live_html = ""
 
     body = f"""
-<h1>BatteryLab 数据控制台</h1>
+{brand()}
 <div class="sub">数据目录 <code>{esc(root)}</code> ｜ 控制台 v{VERSION}</div>
 
 <div class="banner">
@@ -666,7 +727,7 @@ echarts.init(document.getElementById('ch-dcir'), ECH_THEME, {{renderer:'svg'}})
 
     band = soh.get("cycle_range") or ["—", "—"]
     body = f"""
-<h1>数据集详情</h1>
+{brand("数据集详情", "河海大学 · 电池实验室 ｜ 单颗电芯的指标、曲线与明细")}
 <div class="sub">
   <a href="/">← 返回列表</a> ｜ 通道 <code>{esc(rec.get('channel'))}</code>
   ｜ 测试号 <b>{esc(rec.get('testid'))}</b>
@@ -996,7 +1057,7 @@ def run_make_share(data_dir: Path, share_dir: Path) -> tuple[bool, str]:
 # ---------------------------------------------------------------------------
 REPORT_CARD_TMPL = """
 <h2>生成分析报告</h2>
-<div style="border:1px solid #ddd;border-radius:8px;padding:14px;background:#fafafa">
+<div class="panel">
   <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
     <label>长循环·实验样 <select id="r_ce"><!--SEL_ce--></select></label>
     <label>长循环·对比样 <select id="r_cc"><!--SEL_cc--></select></label>
@@ -1004,14 +1065,86 @@ REPORT_CARD_TMPL = """
     <label>倍率·对比样 <select id="r_rc"><!--SEL_rc--></select></label>
     <button id="rgo" onclick="startReport()">生成报告</button>
   </div>
-  <div id="rmsg" style="color:#666;font-size:13px;margin-top:8px">四个通道按「实验样 / 对比样 × 长循环 / 倍率」对应，默认已填好。</div>
+  <div id="rmsg" style="color:var(--mut);font-size:13px;margin-top:8px">四个通道按「实验样 / 对比样 × 长循环 / 倍率」对应，默认已填好。</div>
+  <!-- 总进度条：步骤标签是"到哪一步了"，这条是"整体走了多少" -->
+  <div class="pwrap">
+    <div class="pbar" id="rbar" role="progressbar" aria-valuemin="0" aria-valuemax="100"
+         aria-valuenow="0" aria-label="报告生成进度"><i id="rbarfill"></i></div>
+    <span class="ppct" id="rpct">0%</span>
+  </div>
   <div id="rstages" style="margin-top:10px"></div>
-  <pre id="rlog" style="margin-top:10px;min-height:60px;max-height:320px;overflow:auto;background:#1b1b1b;color:#ddd;padding:10px;font-size:12px;white-space:pre-wrap;border-radius:6px">点「生成报告」后，这里会实时显示程序的输出。</pre>
+  <pre id="rlog" class="log">点「生成报告」后，这里会实时显示程序的输出（逐字打出；点一下可立刻铺完）。</pre>
   <div id="rlink" style="margin-top:8px;font-size:14px"></div>
 </div>
 <script>
 var NL = String.fromCharCode(10), STAGES = [], rSince = 0, rTimer = null, rT0 = 0, rQ = {};
+// ---- 实时产出：一字一字吐 ----
+// 服务端是**按行**给的，而程序一跑到某一步就会一口气刷好几行 —— 直接贴到面板上就是
+// "一段一段"。这里把到达的行先攒进缓冲区、再按帧慢慢放出来，看上去就是一串连续的字。
+// 积压越多吐得越快，所以永远不会越落越多（最多落后一两秒）。
+var rText = "", rPend = "", rTypeTimer = null, rCursorOn = false, rTickN = 0, rInstant = false;
+// 进度条用：本步内已经来了多少行输出、这一步是什么时候开始的
+var rStageLines = 0, rStageT0 = Date.now(), rLastStage = -1;
+var REDUCED = !!(window.matchMedia
+                 && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+function rRenderLog(){
+  var el = document.getElementById("rlog");
+  if (!el) return;
+  el.textContent = rText + (rTypeTimer ? (rCursorOn ? "▌" : " ") : "");
+  el.scrollTop = el.scrollHeight;
+}
+function rTyping(){
+  var n = Math.max(2, Math.ceil(rPend.length / 45));   // 每帧吐几个字（自适应）
+  rText += rPend.slice(0, n);
+  rPend = rPend.slice(n);
+  if (++rTickN % 15 === 0) rCursorOn = !rCursorOn;      // 光标约每半秒闪一次
+  if (!rPend){ clearInterval(rTypeTimer); rTypeTimer = null; rCursorOn = false; }
+  rRenderLog();
+}
+function rPush(lines){
+  var txt = lines.map(function(l){ return l + NL; }).join("");
+  rStageLines += lines.length;                 // 进度条要按"本步来了多少输出"蠕动
+  if (REDUCED || rInstant){ rText += txt; rRenderLog(); return; }
+  rPend += txt;
+  if (!rTypeTimer) rTypeTimer = setInterval(rTyping, 33);
+}
+function rSkip(){                                        // 点日志 = 不等了，直接铺完
+  if (!rPend) return;
+  rText += rPend; rPend = "";
+  if (rTypeTimer){ clearInterval(rTypeTimer); rTypeTimer = null; }
+  rCursorOn = false;
+  rRenderLog();
+}
+(function(){ var el = document.getElementById("rlog"); if (el) el.onclick = rSkip; })();
 function rEsc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+// 总进度条：步骤数给"骨架"，本步内的输出量与耗时给"蠕动"。
+// 为什么不能只按步骤跳：跑到某一步时会**一口气刷很多输出**，一步之内纹丝不动
+// 看起来就是"有输出了还停在 0%"（用户实测反馈）。蠕动用渐近曲线 —— 有输出就一直
+// 往前走，但永远越不过下一步的边界；长时间没输出（比如等模型吐字）也不会完全冻住。
+function rSetBar(st){
+  var total = ((st.stages || STAGES || []).length) || 1;
+  var cur = Math.max(0, Math.min(total, st.stage || 0));
+  var pct;
+  if (st.state === "done") {
+    pct = 100;                                   // 只有真跑完才给 100
+  } else {
+    var byOut  = 0.80 * (1 - Math.exp(-rStageLines / 25));                    // 输出驱动
+    var byTime = 0.50 * (1 - Math.exp(-(Date.now() - rStageT0) / 1000 / 240)); // 时间驱动（4 分钟走一半）
+    var sub = Math.min(0.92, Math.max(byOut, byTime));
+    pct = Math.min(99, Math.round((cur + sub) / total * 100));
+  }
+  var fill = document.getElementById("rbarfill"), bar = document.getElementById("rbar");
+  if (!fill || !bar) return;
+  fill.style.width = pct + "%";
+  fill.style.background = (st.state === "failed") ? "var(--bad)"
+                        : (st.state === "done") ? "var(--ok)" : "var(--accent)";
+  bar.setAttribute("aria-valuenow", String(pct));
+  var t = document.getElementById("rpct");
+  if (t) t.textContent = (st.state === "running")
+      ? (pct + "% · 第 " + Math.min(cur + 1, total) + "/" + total + " 步")
+      : (st.state === "done") ? "100% · 完成"
+      : (st.state === "failed") ? (pct + "% · 中止") : (pct + "%");
+}
 function rPaint(st){
   var h = "";
   (STAGES || []).forEach(function(lab, i){
@@ -1019,12 +1152,11 @@ function rPaint(st){
     h += "<span style='display:inline-block;padding:3px 9px;margin:2px;border-radius:11px;"
        + "font-size:12px;color:#fff;background:" + c + "'>" + (i+1) + ". " + rEsc(lab) + "</span>";
   });
+  // 换步了 → 本步的"蠕动量"清零（输出行数、起始时刻）
+  if (st.stage !== rLastStage){ rLastStage = st.stage; rStageLines = 0; rStageT0 = Date.now(); }
   document.getElementById("rstages").innerHTML = h;
-  var el = document.getElementById("rlog");
-  if (st.lines && st.lines.length){
-    st.lines.forEach(function(l){ el.textContent += l + NL; });
-    el.scrollTop = el.scrollHeight;
-  }
+  if (st.lines && st.lines.length) rPush(st.lines);
+  rSetBar(st);
   document.getElementById("rmsg").textContent = (st.state === "running")
       ? ("进行中　已等 " + Math.round((Date.now() - rT0) / 1000) + " 秒")
       : ("状态：" + st.state + (st.report ? "" : "（没有产出报告，看下面日志）"));
@@ -1070,7 +1202,9 @@ function startReport(){
     .then(function(d){
       m.textContent = d.msg;
       if (!d.ok) return;
-      document.getElementById("rlog").textContent = "";
+      rText = ""; rPend = ""; rRenderLog();          // 新的一轮，面板清空重打
+      rStageLines = 0; rStageT0 = Date.now(); rLastStage = -1;
+      rSetBar({state: "running", stage: 0, stages: []});   // 进度条归零
       document.getElementById("rlink").innerHTML = "";
       rSince = 0; rT0 = Date.now(); STAGES = []; rPoll();
     })
@@ -1086,8 +1220,10 @@ function startReport(){
     rSince = st.n || 0;
     rQ = {ce: st.ch_a || "", cc: st.ch_b || "", re: st.ch_c || "", rc: st.ch_d || ""};
     rT0 = st.started_at ? Date.parse(String(st.started_at).replace(" ", "T")) : Date.now();
-    document.getElementById("rlog").textContent = "";
+    rText = ""; rPend = ""; rRenderLog();
+    rInstant = true;              // 恢复历史：直接铺，别把之前那几十行再"敲"一遍
     rPaint(st);
+    rInstant = false;
     if (st.state === "running"){ rTimer = setTimeout(rPoll, 1000); }
     else if (st.report){
       rShowLinks();
@@ -1142,11 +1278,14 @@ REPORT_LOG_NAME = "报告生成.log"
 REPORT_STATE_NAME = "报告生成.json"
 
 REPORT_STAGES = [
-    ("── ① 重建任务包", "重建任务包"),
+    # ★ 2026-10-11：标签说"人话"（演示用），标记串必须与流水线实际打印的一致
+    #   （改动任何一边都要同步另一边 —— selftest_console ⑧ 有断言钉着步数与首步）。
+    ("✓ 报告工程已同步", "环境自检 · 数据同步"),
+    ("── ① 重建任务包", "重建分析任务包"),
     ("── ① 程序段按最新数据重填", "按最新数据重填程序段"),
-    ("── ② AI 撰写判断类章节", "AI 写 21 段判断正文"),
-    ("── ③④ 校验", "校验（不合格自动重写）"),
-    ("── ⑤ 渲染", "渲染 HTML"),
+    ("── ② AI 撰写判断类章节", "AI 撰写判断正文"),
+    ("── ③④ 校验", "自动校验 · 不合格回灌"),
+    ("── ⑤ 渲染", "渲染报告"),
     ("── ③ 验收闸门", "验收闸门"),
 ]
 
@@ -1317,5 +1456,26 @@ def main() -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# 河海大学校徽（页头 + 背景水印）
+#
+#   由 assets/生成校徽.py 从原图生成：抠白底 → 单色蓝（取样自校徽本身 #0D71AD）
+#   → 硬边两色调色板 PNG。**1024px 只有约 11 KB**（单色 + 硬边，PNG 压得动），
+#   所以直接内嵌在这里 —— 不额外加文件、不加路由，也就没有"盒子上那份是不是最新的"这种问题。
+#
+#   ★ 下面这个常量由脚本写入，两个都不要手改；要换图就重跑 assets/生成校徽.py。
+# ---------------------------------------------------------------------------
+# SEAL_B64_BEGIN
+_SEAL_PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAABAAAAAQACAMAAABIw9uxAAADAFBMVEUNca3///8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/K4QWAAAAAnRSTlP/AOW3MEoAAC0QSURBVHja7d3tkuO4rQBQ6f1f+lalKnuzM+62RIIgSB79Sna6bZkkTlv8AK7bNea6fro0zdt20ygDm1sTAAAAAHABAAAAcAVH+7dL02k6ABjFmk7TAeCYoWs4azkAGMUA0HIAMIoBoOUAcGzgnzWgNRwAjGIAaDgAGMUA0HAAMH4PGc2aDgBGMQA0HQCMYgBoOgAYwEeMZu0GAAAAQLsBwBA+aUBrNQAAAABaDQAAAIBWA4DY339Uay8AAAAA2gsAAACA9gLA2dGfEhx7hvzInnABAAAAcAEAAAAAgCtkWFcJn/UCPusujGsAAAAALgAEjq69jsqtNzXPAAAAAAAAAAAAAAAAACSNp4M20tSfpWAAAAAAAAAAAAAAAAAA1ov9MxSo0XTGOgAAAAAXAAAAAAC4ng4dh2tX2IOHAAAAAAAAAEBgpEmzsdLWewYAAAAAAAAAAAAAAABg2ehfzAI9CwAAAEDPAgAAANCzAFg8/GUt3ztPOQAAAAAAAAAAAAAAAER/5PCYEEErRXvWWyIAAAAAAAAAkDEyKn+dXuYWcjsFAAAAAAAAAAAAAAAAov/1mFDTunzzMAAAAAAAAAAAAAAA4GwA4obXuZtsCrRP3K0AAAAAAAAAAHDV3Ikr8Ed3GQAAAAAAAAAAAAAAAM4M//rH8MT9sL4DAAAAAAAAAAAAAACA6C+elU/UtzUIAwAAAAAAAAAAAAAAAPC07+MH5cYFOPvve1RLAAAAAAAAAM4DYMigCRpHlR8QKtxY5FvYEAQAAAAAAAAAAAAAAIBC+b2vja+7TjZxAAAAAAAAAAAAAAAAiP5yVabF/ch+MQ0AAAAAAAAAAAAAAACAsvWlBX62AQAAAAAAAIATwn+dYhICP95oAAAAAAAAAAAAAAAAAGCNYnLHR31Ubx0/CwAAAAAAAAAAAAAAYAVwvW0ichL2GQAAAAAAAAAAAAAAAAAArJ818uQCpa9v//DtgAAAAAAAIPoljT609AsAAAAAAAAAAAAAAAAOB0D0H7jr6+QuBwAAAAAAAAAAAAAwFoQ/9QEAAAAAAAAAAAAAAHAOAKKfAaf1PAAAAAAAiH65IQAAAAAAAAAAAAAAAAAAAEwZANjxBwAAAHABAAAAcAEAAAc9A5p8mGXAmcdAAAAAAAAAAAAAAADOSAvzHIC5Ny14Rw4FO0EBAAAAAMD3/zq1IQAwdShcBz4FAAAAAAAAAAAAAADIDG0CwDQAAAAAAAAAAAAAAAAAjkwDZALAjNARBAAAAAAAgO//JXr7cACGfnC1YQAAAAAAAAAAAAAAdgXgZffV6uiTARjfA/3lYQAAAAAAAAAAAAAAALD6gk9ZAO7jl+mmzgKcNA0AAAAAAAAAAAAAACAN0NwuBsDIbggpE79b7wAAAAAAwIkLAAA4DIA4AwAAAAAAAAAAAAAAACD67QJKikoAAAAAAAAAAAAAAAAAwAQAABgAAAAAAAAAAAAAAHAeAK/3bVXs1Ceb048BoAo32+8IBAAAAACAo6J/KQAOSEqR/hG7/1Js1BkAAAAAAAAAAAAAACfM/q8U/kdkpLiKANByMnj97gAAAAAAAAAAAAAA2Onx/3V/lgPgkLzUMz5iyF8MAAAAAAAAAAAAAAAArBD9RScAPgBwToH6OgCcaAAAAAAAAGwW/Vdcx2dNbP8U/aOrZtfqyboVZHY9FgAAAAAAAAAAAAAAsPfjf1r3tbzJ///Mh+i/TskFUjkTyZ7HAgAAAAAAAAAAAAAATgRg+l7zfwPw548DYJFpgEU7CQAAAAAAAAAAAABg+eW/hq1clQD48LN75wmfHkGROwKX7CoAAAAAADjzAMC4HusE4N//cePc4OsBsJsBAAAAAAAAAAAAAAAOAEw7EPDxp66P24O2KUpTInZaRsdGe4IAAAAAAAAAAAAAAHZ8/J+YBbAFgM8nhPesS1mtMHucAQAAAAAAAID50X/P7qP2d/s9R+CuANRKD7L9agAAAAAAAAAAAAAAgOgv97ErPjO/7LW2Qx0zmI4EYJFRBgAAAAAAAAAAAABwyPIfAGaX/L5eXCsbAAAAAAAAAAAAAAAAgLT0P+vXcfllG+BvVUQX6biKAAw5FlB+sAEAAAAAwGbRP/MAwO/3EgpA2eG2KAAnGgAAAAAAAAAAAAAAsE74D5jRrZX24isAlcfahgDsuicIAAAAAAAAAAAAAGDvx/+lMt89BuAumDK8OcJLih1kQE0FAAAAAAAAAAAAAAB2Xv7bEID7XngXZ+mouIYsB1b8tAAAAAAAsH/010k7/eIX7sZCg9U69X/KnC/yOa5TDAAAAAAAAAAAAAAAKP7QeC/2+N8NwEZlqLfIarLhagAAAAAAAAAAAAAAQOlFo0Wjv2WjzrYArJYuZ8RkVK0PDgAAAAAAAAAAAACwYfRXEu5//k/jo+NWAKxelKp/HyQAAAAAAJwNwCnR/1cm78dfNT/vCfL9v7YBiywIAAAAAAAAAAAAAACs9uy/SAHAz/H+4HN8PRks+isXp19hOQcAAAAAAAAAAAAAQPRPA+CnOj///R9L7wZafR/TaAMmtgcAAAAAAAAAAAAAQKV8kQOXZ2oCsEtGzbjEqLsYUHlFEAAAAAAAyqWLHtobALAAED5yUwY+AAAAAAAAAAAAAMBqAAQN60ULzbzJDbJL+D++5/UThARNBKQ3AwAAAAAAAAAAAABA/UqRS0ZESyXvr4XAy4fLmy5aaoYgYVtQXjMAAAAAAAAAAAAAAMyM/f6VlPIj5uXz7ucPt9IHbkyiaUUwryEAAAAAAKD8V/9Vv/3/GfL9d1w743ljNfMtFjiGLAiMbgsAAAAAAAAAAAAAgBkP/hGttchg2RiA6B6+73t3A97FCQAAAAAAAAAAAABAXQCu4Nh/8JKrjpT+V9olDtY9NDz+b9voRgEAAAAAgAmxH9Q66w6T3b//n5E5OOVv3MCWAQAAAAAAAAAAAADICv0rq2UBsEzVj918HzsZENYyAAAAAAAAAAAAAAAVHvwb11dWSAjS2YNbJNfetoTgonMBAAAAAAAAAAAAAABLPPv/Xll744F9IgArfdDEAIhrIQAAAAAAqPHVv+1lFikMAoDdAQjdupZlAAAAAAAAAAAAAADAtDO/PS90IgD3ptfqAMSlSMlSAAAAAAAAAAAAAAAgPdV3RDHspcoDdt4jAPaZCxjCAAAAAAAAAAAAAABANADBtxH0cscBMHaz5uz42wKA/pmtrIKiAAAAAACQ/GlCP85SBUIqVWMvC8I+yx3XlL+ZAAAAAAAAAAAAAAAhAFSe0jxgf8zckN8gK+Mi/ZMdjAAAAAAAAAAAAAAAw/c2Dxpbh47Iq9Ql0LMLgUdpAgAAAAAAAAAAAAAw6I2GjqaThuH4SAXBOtMBIa8BAAAAAACt7zLn60/8JvsNA3/u+wv3pHDorUkIAAAAAAAAAAAAABD96uNHzJmpsqdHHAgKtV/XYXoAAAAAAAAAAAAAgCnRH51qZ4uBt054UaAAA82/DgAAAAAAAAAAAACQG/5Dsm2ekVJ6yfsW8COpBwAAAACAIABGR39W8+02FlKPEIBgsQeplt8FAAAAAAAAAAAAAOh6qTkhuctwG5Ef5Zqa+IMC78v05BsAAAAAAAAAAAAAANC1oPDkI4wPnPVOCOSWWsqm4FgDIjJchUYgAAAAAAD0AFDxW9+fe4AWSxaYdthyqgTHPQt0fsSu433vfhMAAAAAAAAAAAAAoKuvJnTyh2MA66QMH9LFlS1Y4VTjwHmpmgYAAAAAAAAAAAAAANxZTx7xEwB//b+/72yDB/9rgeuOXKWa0x/BPVtpoAAAAAAAAAAAAAAAPAag6CrPn2/yw2dcI4fe6oEf8XnKdEeZJI6j51sAAAAAAGDQ9/+szvvrRv7zP8sZ0NJO1+JX3vflmY8AQzOtBEclAAAAAAAAAAAAAMCV9UYTAKhlwBkP/lGfcnbvFCvcPu4PMwAAAAAAAAAAAABA4CNqarf99Z8+xnu9Wtqbx/3DIVFkLiDvNHbWaiUAAAAAAAAAAAAAwBcAQicAsvvs8Q1NvMenlVoKh+vQ6YACDHSSNQGA/vgEAAAAAIAq3/9fvsJjAD5nDJ8T/RNC/93rJyQiX8eAD++fGvijH9EBAAAAAAAAAADAuQBUmABoeZlvKUB+eMWs8dU58uMfuXO3qocpcBcy4MmnujpSvGetBQAAAAAAAAAAAAAAXLMPc159pXFeZ0PJLlk6I/rzstZE74qvaMBPfz/iQr/reAgAAAAAAAAAAAAAQBAAEycARgMw1oARsX93p29PWa2KUuCqd0L4y+nyMIqjQ+XL4jAAAAAAAExO4xAKwNfvcEMNCI7+OQcMxhY/WeZR4NnxgNxi68F/rAEAAAAAAAAAAMCpANTI5Ba3Eejdhv/Rw759xMw9YDy6CGJzU9335Fwh8bE/J7skAAAAAAAAAAAAAECFki7NR1I7DxaPWwJrjIqglp+QuCZ0sbOuAalP/eMSzAMAAAAAAAAAAAAAVKjq2FiZpT+oh2xmbBlH5QoLZQfQBgS8+52JmWYBAAAAACACgPueWXL7zcTts081IfrjOrzGN9UTDWj5yHfGxjkAAAAAAAAAAAAAgC4AilRy+wZAz6JCf4XouNi/ChYWmqNAmVEXmZ0x4cwJAAAAAAAAAAAAAMCDJGbnAtBiQP+TYGL0B2ORbcCcgffhfWZuq4qcFgIAAAAAAAAAAAAAqL8G+NuBzEEt2/8gFrrrvzm9ULnNglEG5I26hwfYAQAAAAAAAGM/7kAAHhvQGf1ZX/2zVgxmGTAtG8gv95ITIgAAAAAAAAAAAAAAOQBMWAK4HpX4yX6y6tz9kxL9E3JcDDHgrmXA16yA//rXCuXn3/c1AAAAAAAAAAAAAMDcGYBnpb6HbvFuKRmTcPA3MrfQNAYWWQ58t6fqvueXL+3qdwAAAAAAWAiA1OJ+FWb/a0z9JyowxYD2jdWzjiUCAAAAAAAAAAAAAOwAwLe4GHgjjXPQNaP/mnJFGnBH1pOMP14JAAAAAAAAAAAAAACArBWPuTdyj1z+Wz36sw3oevkXx4B//PNQ4E8jAAAAAAAAAAAAAMA2APzevNNWJGtt/yuw9tepQHt+7aCtcC8H1e/HgAEAAAAAAADDDagBwNzdP2VDP9qAxg1B727zzW2nJQIGAAAAAAAAAAAAADgTgIkGtE8AjI/+KyjpXk+ZuzIGvFu++fz6nVuLygGwckIQAAAAAAAAAAAAAICfdn9kp2B+fWp54O6foDDq+K2+FH8RlY7epHBqOHMempunDAAxacEBAAAAAAAAAADALgC8eaH7nktAVznwQUkhp2//C65IHrIqdnXXXW/eEZg1tOfujQUAAAAAgHcA9I/Ee9L1e2HmAtH/fldGQvR3xl3Yyb7+13h5MLAlYfpd/QIAAAAAAAAAAAAAOAyAD5066saCNwBN2/0Tmgc7fDtPvwGPmQYAAAAAAAAAAAAAAMAGAIwzIPoAwOBgHlW2e0BpnXAD2v913nZ+AAAAAAAAAAAAAAAA9B4LCL63K3gH4DUl/WfBcRq3KTCE67CZj5IA/PLRAAAAAADg8ScvP7qCDQg9AvhmjMVV/yg7VINOF0Q9s60HQE/U/vPIDAAAAAAAAAAAAACwIgChu1dCzgB0P6DvFv25BrQsr9Qe3wAAAAAAAAAAAAAA4QC8GTxlR9l4AIbs0Y86kLvI0+sUA6KzPy62CPilBBIAAAAAAAAAAAAAwLoAxD8Fh54BOPzxP2K65gpLEdoDPwAAAAAAHAHA49crPbpGADBqj/7S9drGPwdczQcD7y2vHgD++VcAAAAAAAAAAABwLACdD6mlG2WTCYCo6L8yrjkGLJ7fb8iM19fGAgAAAAAAAAAAAABof8m6TRP/GhMWAOOe/msA0LwcGHwm4NAJAAAAAAAA2BWA+ESDzV9eW7NYNANQIPr7axAGPT4cNEYblwAAAAAAAAAAAADA6QBstBAwB4CeCYCsDUCFAJgwDWAJAAAAAAAAAAAAAADgIQDHTQO0xGr9DUCpAIw+FgCAsDgFAAAAAAAAAAAApwNgGiB2AqD/DPC9yQHgiWcCNjSg8+8KAAAAAADEA7BF+7aUArmlAEk3AADNS0sAAAAAAAAAAAAAAK0nXc8AYOoEwKsSg7sN50gDdv8j1fU3GgAAAAAAAAAAAACgdxbgQADuQWcAsuofrVss6FAAgqfpAAAAAAAAAAAAAAAOXwiMygTa94Pvo39jAJoN+PEHbyeBAQAAAADgDQBnHAnMBSDu+z8ADsoQHpyMEgAAAAAAAAAAAABgo0rhxY4BD50A2PVEcE+L7AlA/AwdAAAAAAAAAAAAAMDRaYGCAAheppmT1LvWdVsJBAAAAAAAAAAAAAAoDMAuqWlCMwFFrOddZ1+3DOFjBhcAAAAAAAwe7ksDUOH7/3UBoPNU4PEA/PCKAAAAAAAAAAAAAADH7gUKygUIgLIArL8OMGRuDgAAAAAAAAAAAADg3JXACACuK7Bii+iPWCDd6kAAAAAAAAAAAAAAAAAAUgCInwC47QDMmwP4pS9tAwQAAAAAAAAMXALo3Du1YeWVuaVFAAAAAAAAAAAAAAAA8BKAXfcChQDQfIDicYcLdACE/0kGAAAAAAAAAAAAAADAw5PAT38wrrdF+dmVwkfNygEAAAAAAAAAAAAAHJocvBGA//zskEo9lv8iqwsBAAAAAAAA8gBYqXFbaoIHFLR419VivMOALQqEPB4VAAAAAAAAAAAAAAAAmAbA0N0eLgAAAAAuAAAAAC4ATARg8afWMgDEryYC4Guf7gbA+4STAAAAAAAAgPe7gOIAGPIwMXHrzVU4peCJAPz2ugAAAAAAAAAAAAAAAEgFYPSSgtDfBIBxS3IAAAAAAAAAAAAAAI0LCrsAkLsGuFwJnj0AWHIvEAAAAAAAAAAAAAAAAAa1bBYAvQ+uEw24LgAAAAAAAMDuAJxxHjAbgOZfBwAAXtecAQAAAAAAAAAAAAAAQBgA97sTqN3Rnxt8JwGw4jAFAAAAAAAAAAAAAADAEAC6lueG7vsHwM933NJrAAAAAAAAAAAAAAAAAMCbDJ3xABQ4RLDYWYD3qVUBAAAAAAAAUQAsXM8iC4ArP5XgAecYG5OrAwAAAAAAAAAAAAAAAAB/3+8SALgAAAAAuAAAAAC4AACAkgCk1BV3HQ9Ay5ACAAAAAAAAAAAAAAAAAA4AYL2cQAAAgAsAAFgAgDtg44w4HpxD+yQAvrwyAAAAAAAAAAAAAMBZADwbIUMA6HlscwEAAABwAQAAAHAB4CwARh2nff3Zm9cAd0qpdNoy4JyeAQAAXAAAAABcANgWgKyMNnMBePfBhXRBAHL7ZWhyXgAAAAAAmAjAdaXntCsHwINmENq1AJhuAAAA4AIAAADgAgAAFgGgeKrt8as0NT5aCACJCgAAAAAAAAAAAAAAACCo6QFQhe11AJhjAAAAAAAAnAJA1uQrANoMuFa8IodT+hoNAAAAAAAAAAAAAMCJpwEBUAWAa9EreDjlGgAAAAAAAAAAAAAAAIB7UlpwAABgyoogAAAAAAAAAAAAAAAANgSgUGQBoNxcAAAAAAAAAAAAAKgFQI4BAAAAAAAAAAAAAAAAOBmAno/67F22ByB+mI4m4OorQw8AAAAAAAAAAAAAAIBmAFrKgwcBkFVe8d4yHdBoAEbPBfTEIQAAAAAAAAAAAAAAAH657yEAPDYgsShQ/1sBIHUuAAAAAAAAqgKQ+6X1LABuV4xEKQC8pBEAAAAAAAAAAAAAAAAAAMCYoHvW6Xd+aUQAAAAAAAAAAAAAAACUAWDCcQAAjIu79BzzAAAAAAAAAAAAAAAnAjCuiwHg6jvhEN+84wqxAgAALgBMAODFLQMAALUJGAdA15nK+HcBAAAAAAAAAAAAANgTgOAXfxncTzKHNB8SnQjAFta8PghwzT1UDQAAAAAAAAAAAACwBACPf3Tiwc937371HQdo6ZhQADrXnfpPqB4IQGLoAwAAAAAAAAAAAACcAMB1Da9vuRIA0QVF22Z5FlmwfL9yWz/2O8bZoyEHAAAAAAAzzwJeV3KF68cDohGAD+8/BICetmlsvGGVC2cAkLjrBwAAAAAAAAAAAAAAAEsD8OBBurFkTBYAjY3X3Pbje/H54G9+/bnedU3IAQAAAAAAAAAAAADsAsDE4wD36+07ZQBoSaO9AgAtK59lqn8DAAAAAEAhADp7t/PjzZ08HgLA448YH5BBAPSE7VAA3rxIEABFFzgAAAAAAAAAAAAAAJYC4C60f2RqYsCxADTW0isLwOsX6Qeg8h4nAAAAAAAAAAAAAIABAJRLZDcLgJZpgM6g7gSgq5x2NwA98xW9LzfiIEAZAwAAAAAAAAAAAAAAZgCwSzmb8gB0ReXrX4sHIPBFWtNDRh00KDQN0J+yCAAAAAAAAFBnISD0u3VjAI3OyDx03n/EEsA6ALx9gAcAAAAAAAAAAAAAiACgSA3oZRcCQubFe8IoryjL8IzxuwPQ/1cZAAAAAAAAAAAAAKD4QYCBwy8FgGeDMCG45qwBpof/z0e714v+UXuBAAAAAAAAAAAAAADqrgEmJAx9XST0gRQtyUFHh1h2RtBpALTUZtoYgB9+FgAAAAAACgNwXVdK0vCW03N3Znrw6LWOeADKfv/fGIA327YAAAAAAAAAAAAAAIYAkNjxjcE1F4BnI3HwBMd5AMRlrV8BgFc/CAAAAAAAAAAAAADw4vkhYQj0nxeNq0+UWic0pWp2dHnwOQdAWvpl0egfshcIAAAAAAAAAAAAAKDSGmD7SzffURkAgoLtil9BnZgACgAjNgMCAAAAAEAQAOM+Zsq07dVWS2NIYpBrWN690Krc02fARycCKZf2MngvEAAAAAAAAAAAAADA83TNqTMAkaV+NigTOBSACUN5AAGDFoYqQBA8SQcAAAAAAAAAAAAAUASAiBdNBOCrAXfbImfnmCsb/j3vnpsLsNmcCgQAAAAAAAAAAAAAAHQBkH0SODj/Tfax4KZpgOCl1rLP/v03kpgJqLsYUT0A/moeAAAAAAAodRDwCs+ANxqAxAzh8WO33Gae0MImI/aTVayS2CgFAAAAAAAAAAAAAEAxAOY48vr5PgiAr50YdadT9rCEPkknTQB8H0GzIIg7EAAAAAAAAAAAAAAAsNEaYNcrJR0Lfp4cqO0JODfuP7/PdQ04klAGgFkQAAAAAAAAAAAAAACEALDbGmAcAI0GxE0DvBtr910nT03P1fJu96BMQBVPDwetBAIAAAAAQB8Ao4bSxFealh6wbeRPN+Aaca0HQMSBx9ynAAAAAAAAAAAAAHAuAG/uN7EmeBkAmnODhAIwbnN/bvnxa1Cd8nEfaUJ5q6zcgAAAAAAAAAAAAAAAGwHQf3uND1f/+tnQSZVRAFyTypD3p/h+3KoTZ6J+2s5VpE4oAAAAAAA8HgAps87BX76GlCccmhsk8fRZCiUJ1x1bVybuQfS+S1cKBwAAAAAAAAAAAKcC8Kb3s9MdzCot+ORlrrBCIZEA3MsUv0uJ/tIRnALA73/gAQAAAAAAAAAAAACKADBwH3/WNMC4k8FD9wBNOV0QvV3okPB/MSEHAAAAAAAAAAAAAPAQgM7HjsjPNnH39XVdQ04Gxz/R5ZS+HBpQIyYAmhplt1mAX5oOAAAAAADKAdDyRW7QvUWcCWg8GNgyrTtz784EAsYdbAQAAAAAAAAAAAAAAMBcAH5/n6FPq+25Qb5W6YhMD1IpmV/PndWI/kWWEfr/YgAAAAAAAAAAAIAjAehPyDZhWWjEjpjVNgQ92C0Vmmgw0YKJZwAqVVsCAAAAAAAAAAAAADgRgPjq0kE75uJOBj/U5MXn6d07X4CAiDMA8UMOAAAAAADOAKDS96OwARb63bDRgNH114OTbZc1YNSiSGJxPwAAAAAAAAAAAAAAAPQP7J7wHXoyOMuAnlBcGoC0PWDVFAAAAAAAAAAAAAAA2BmAng3fcffcfjI44lhAy3mIzu30RQHIKsH97sD3egBcIZXZAQAAAAAAAAAAwN4AbHFcMqjiaI8BXTv0kvZMjjo30P9W95Qs4DUV6AxdAAAAAADYFYAh99q5s/5NcEd0TtaRyeg3nLUBaLGnAQAAAAAAAAAAAAAAALyvmlbbgGuwAauXvZvzeQo1KAAAAAAAAAAAAAAAAHL2K3Vvp3kzzEP2ai0GQOOWpQL3mHsjA/82AAAAAAAAAAAAAAAsA0BWf1xhBlzhBqwe/u1HFu6MIlSVpgMAAAAAAGA2AGVG0tyiJW1H2q6+zN05u3LKCT7qfGekArUG/MjTgAAAAAAAAAAAAAAAhcZN9s7wlnZ/fPMDVgPiq/OlzKmnRP/7FwUAAAAAAAAAAAAA2BaAgguBM590IwzoKSzai09qxfAIpIpG/5uC7IUAeJsWHAAAAAAA6gDw5GNl38IsA+IIuKpcoXt2Hr9M+USXcRkjAQAAAAAAAAAAAAB6X6rSvp+59cuXMaAyAFm7f+5Fr4hlHQAAAAAAAAAAAHAqAHFPE7Wef+Ymi44Oq86gHp9gfMLjf0iH3TcAAAAAAAAAAAAAAAC6Xq1sSeQJtxUfWT0GXMsYMHrleWJ1+YmprwAAAAAAYH0A2ofwsxcfvRqwlAGjKwU2P78E3duK1QCb2uS3s6gAAAAAAAAAAAAAAD0vOeHDx235GJJdevSCQIFwCjWgVvSXTasYEq3/JKUEAAAAAAAAAAAAAIh4yazP/7q5BlSGuadsC/pWWCg1pqIISLnTx69UObM6AAAAAAAAAAAAAEAAAMEveRfeM53zObIO3kYaEN97nSmoh9xgyAzX3CHf0ncAAAAAAPAWgMoHAkJ2f6cWurgH7bgvuiAQ/NU/6N5aDkEUO04YV+QFAAAAAAAAAAAAACD4desakKVXxSx8WZEW/Ow/BOagQ91LTwAAAAAAAAAAAACAowEY8tL1y6jM2QqzggEtLRJRf3p057zMtx63HW3oIO75HQAAAAAAAAAAAACAQ6YB8m63aE2ee2r6z7l/TR5vpgw9kVJrAgAAAAAAALoBWMqAWokMX1de2eMq0DkRh/xqJMMP+QMNAAAAAAAAAAAAjgYg3gDRP2QH92ahP2P4dC8IpY+hcX+dAQAAAAAAAAAAAABi36aGAVVuLPQhbo/Ynwdz54idW3Y29A8zAAAAAAAAAAAAOB2A+GeN6QasUNVxYwaKrx83vnHq7bbHFgAAAAAAZABQcUNQ9N3EfZjggFks8HPGyjXlPOEC0f/3aVAAAAAAAAAAAAAAgJ7eqTQREHkXWXnDH77DyqGfMEZGv0ONx/+4P8gAAAAAAAAAAAAAAGMeOwocm6y4itjZXksFftKfh9GpHxOHdEr0AwAAAAAAAAAAAABsYEDcu2Z9jv4Wqxz1uZNDcTf94adSB3NQtiIAAAAAAEgEYFYFjh/ffZEiInHvVybqs/8g/PjiI1C9y5aweZ+NHQAAAAAAAAAAAABg6BxkaiGe6Lxr4+8/vt1mxPyUIfD9STdsImti/w+ZggMAAAAAAAAAAAAASDNgnAItr/69gmKNDDCFS69OvPn3lUfLrWUP3mn1a1Z2AAAAAACYtFO17JCdWwjiWqT1Zt/um3foHrylm649NyMAAAAAAAAAAAAAwKx96pUTdE+7zaET9Yl3V2PXVzk4U05afm8WAAAAAAAAAAAAAIC5p1VrPfiXGTnjN+6sdiMtqTkKAZCVaQUAAAAAAAAAAAAAoAmAoK3RZRR4/a71K52OatXcd+u4t3L1fBIjIcAPAAAAAAAYnh9h+hBqe8uKW/Cva9GyIPOq811Vi1UODahHLwMAAAAAAAAAAAAAMC5ZwetWqLHjojEJ9lkSzAyjRSYA8qP/aWQDAAAAAAAAAAAAAOS8Z+rY+vayD48BF19u2jjmO2v0lD1zMvRv6PPbAwAAAAAAAAAAAADIe++0sfbuQf9HHMrVj87WYG7INxow93PFt+2A4k0AAAAAALDTZ/rpHV5G7pKzzcvmF3m5g+d9LvC5xUrGVVjv/BgAAAAAAAAAAAAAANM29Vc8Y9ozO3u7hm/5efOvBRaeEpbMmso4AgAAAAAAAAAAAAAMYqDGXEB8viAAJPbD41mXx1WehoyzKQ/+7XcMAAAAAAAAAAAAADB2u9kKcwEhuZmFcBLBH37qVWHM+HDKC4OgIQcAAAAAAIUMCMpEnnbaTPRPff6KH29zv/pnL1oAAAAAAAAAAAAAANSpGFfoHCcACs37R6/dTM053791KeDOAQAAAAAAAAAAAAAWU2B8f4r+yrHfkyy8VvRPK70OAAAAAAAAAAAAAFCPgWtyFdGEAwDHujFwD16V6K8c+gAAAAAAMD0pdUojFwfguCeI8QngFwn/6YkaAQAAAAAAAAAAAADqpqHOfCpq24a+1qNrsegf8srFp/6vEmnaAQAAAAAAAAAAAAAY0JhNZrw2u0T96Mf1lMBJ3Pg/vF8AAAAAAKAIA9N3BQEgpcJfezXr13n+yk39X6UKNAIAAAAAAAAAAAAAVFBg4lxAdvQfU0zka/WO0MbKWiMaF/2ZXQMAAAAAAAAAAAAAUIOBWQY8fJm4vmp7nfWw6ATgfR+nLBKvH/0AAAAAAAAAAAAAAKXmAsbvxWqMx9DuagZgsXmDz3fcUv6zfavd3O1/FWMfAAAAAABqFYKb/RzwEoA7f9f6T79VmYMfP+cvDdDfreOyjewS/QAAAAAAAAAAAAAAC84FjDMgd0hFbB6KHkp/vl5IID5r0LjuHLFha8DU/0ybAQAAAAAAAAAAAAAqMnDXSRk+6uRxxK91Vta+327eGQJAdC9e4dvDrsjV6gJLuQAAAAAAAAAAAAAAS64IZjXuwFWliF/r3C43B4CUNE9zor9+7AMAAAAAwF23VlwlA8blHryDd9SMA6CxGb79Rt342D36AQAAAAAAAAAAAAC2NaBiuZkEAN5tUrnHrTa0AFB7QCacdAEAAAAAAAAAAAAAOAGA/obLMmCWJ7/9Wh4A79viwY+vFP3XPtEPAAAAAAAAAAAAALAIAdes5cC6EwC/fPL2lc3Xh3gnAjB622el8rUAAAAAALApAP3NuMTM60gAnr/+7z/1Ygd/yMcNzo8yZADuFv0AAAAAAAAAAAAAAEsZcK9rQPwSwC8APMtw3r99pyvVets0wKjuHbT7p2qgAQAAAAAAAAAAAABsMhFQ2oAhFUH//NdQAB5kSe8H4E3LjOvZ+PFWvIorAAAAAAAAAAAAAMAJy4HHAfAgfvsBeAJNxOxIXtanmP2ntaMfAAAAAAAYUB6Ar7f/4V9bfuf1YsXXhu2Z2U+M/eYBs3T0AwAAAAAAAAAAAADcB+0JKvJh4tBoqRgePMk/DoCcPhwx+79AdAEAAAAAAAAAAAAA7DYRUK5vZgHw9fxACADvEgtVKqoTH/33GhcAAAAAAAAAAAAAwEkGrANAz66+BAAeL95F9HTu4No9+gEAAAAAYAsD1tkQ1BMSr3/gWWz232gcABPMfj1Arl3CHwAAAAAAAAAAAABg9YmARQxIBeBZbIbc6PXrSkRnP08YVNs//gMAAAAAAAAAAAAA7D4RcFcE4G2WnF4AftonFA3Ah338E6uxJ24Aupe7AAAAAADgAANqPgS8eXKJfkYIBuDzb/QAMG0wHbABCAAAAAAAAAAAAADgDAPKdNvDe2ix7fG0w7v2an92L10aO3YD0JqhBAAAAAAAAAAAAACw+56gotMAnTkwXn/wFAD+/T67R/+ygQQAAAAAAAAAAAAAsIsB93Ing3tG1+sFrEY0Bq2sVWr7+6DHfwAAAAAAWPmK2xBUNtdhVzaOyMx3ZY/zJXz/3zX6AQAAAAAAAAAAAAAYUO5zRJ+dzQLgzS6mxScAlo8fAAAAAAAAAAAAAIAzjgXs1pkAGBn+18bhDwAAAAAAAAAAAABw/I7A7QF4vULX0zhbrADuHf0AAAAAAHCgAZsldSgJwFJj5czv/wAAAAAAAAAAAAAAh20IOhSADx/8IADizgBsEzcAAAAAAAAAAAAAAFv27r37YmBztXEAnB39AAAAAAAAAAAAAACmAbbr3TuqOunGQ+TQ5T8AAAAAALivjQd2Y0ff51zHfVoAAAAAAAAAAAAAAADsBsD7iYBjpwEOvHpHxZZDAwAAAAAAAAAAAADgxA1BABD+uyeNBAAAAAAAAAAAAAA4FoDPPWgWAACnRj8AAAAAAJz9FAAA0X/k/D8AAAAAAAAAAAAAgGkABgBgt3zxAACACwAAAAAAAHASAO/Ocx7X66Jf9AMAAAAwDq7jOt5TgPAHAAAAAAAAAAAAAADAbSnALMBRo+A+/gwAAPQ+AAwBAAAAAADwAMiAs/v/uDMAAAAAAAAAAADofwAYA3YEWgY+sucBAAAAAAAAABD9AAAAAAAAAAAAAAAAMBYYcHBCmDM6HQDGAgAAAABjAQAAAIANQcdViAcAAAAAAAAAAAAAAIDa0Ne11brQ1XqJfgAAAAAAAICngCVGxpV03TvkggcAAAAAAAAAAAAAAAAA1iPgKnKt+vhvyQcAAAAAAAAAAAAAwLHgd+F1dtSv0yahowIAAAAAAAAAAAAAAAAbA1DJgGu5q1DL3FYAAQAAAADgaADa+nvuWL/Wv+ZGf/yAAAAAAAAAAAAAAAAAwO4API9CsZ/XPBFvKfoBAAAAAAAAAAAAABgQFJBlA7+GPVnNE39uGAAAAAAAAAAAAAAAALuljLyC42JW4C+yJXHsm477QwAAAAAAAAA4p2xE8al5CUleN4fv/wAAAAAAAAAAAAAAAHjX+1LwVeVA9AMAAAAAAAAAAAAAAGDcGBD4tSAYnTwQAAAAAAAAAAAAAAAAB+8ITB/sG7ZxxTMOh0YCAAAAAAAAoH0sCP0p7TNNfQAAAAAAAAAAAAAAAGw5LOcO9CPVnRX7B0c/AAAAAAAAAAAAAAAD4oZFhagv61H2XRzqLQAAAAAAAKDEd8PsF1+/0kdW45weAAAAAAAAAAAAAAAACFhghFzXJTmhx38AAAAAAAAAAAAAAADsP0yu68ha4OMay8gHAAAAAAAAAAAAAGBAweFyrXzpTgAAAAC6EwDbHFYT+LUtOPm4JQAAAAAAAAAAAAAAAMYFncCvyMDh+VYAAAAAAAAAAAAAAAAwPv6EfgkI5FsEAAAAAAAAAAAAAABAdiCWjfr6LqXem6ENAAAAwAWAyamrN9h3P+v+FVsBAAAAAAAAAAAAAADAsVtytJTQB4BhraUAAADDWksBAAD7j21NJvwBYDRrMgAAwGjWZAAAwP4DWrsJfQAYyNoNAAA4aThrOrEPAKNY0wEAAEaxpgMAAA4ZzZpO0wHAKNZ0mg4ARrGmAwAAjhjKmk7TAcAo1nSaDgBGsabTdAA4YkBrN00HAABoN00HAEVFNJ3WAwAANJ3WAwAANJ3WG3j9H8Xhbc7FjbBBAAAAAElFTkSuQmCC"
+# SEAL_B64_END
+
+
+def seal_uri() -> str:
+    """校徽的 data URI（没生成过就返回空串 —— 页面自动退回无校徽的朴素样式）。"""
+    return ("data:image/png;base64," + _SEAL_PNG_B64) if _SEAL_PNG_B64 else ""
+
+
+# ★ 入口守卫必须放在**文件最后**：main() 会一直阻塞在 HTTP 服务上，
+#   写在它后面的定义永远不会执行（2026-10-10 就这么把 seal_uri 弄丢过一次）。
 if __name__ == "__main__":
     raise SystemExit(main())

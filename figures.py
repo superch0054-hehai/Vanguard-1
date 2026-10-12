@@ -641,9 +641,23 @@ PALETTE_DQDV = ["#1f4e9c", "#12a08a", "#b8860b", "#d35400", "#c0392b", "#6c3483"
 # 一片橙黄渐变（#ffd54f/#ffc107/#ffb300…），出图后三条曲线肉眼分不出谁是谁，
 # 图例也成了三条一模一样的色块，"按圈号区分"这件事等于没做。
 # 现在改成色相递进、明度都够深（白底上也看得清），相邻圈的 RGB 距离足够大。
-# 对比图的样品配色：第一样品蓝、第二样品红 —— 五张参考图统一的视觉语言
-# （参考图里就是 Baseline=蓝、PBSF=红 两个样品叠在一张图里）
+# 对比图配色 —— ★ 2026-10-10 修改清单 B5：**全局固定**，实验样=红、对比样=蓝。
+# 以前按传入顺序取色（第一蓝、第二红），结果图 1 恰好画反。
+# 现在按**角色名**判（本批样品名就是角色名：长循环实验样/长循环对比样/…），
+# 判不出角色（以后换了命名）再退回索引配色，不至于开天窗。
 CMP_COLORS = ["#1f77b4", "#d62728", "#2ca02c", "#ff7f0e"]
+EXP_COLOR = "#d62728"   # 实验样 = 红
+CTL_COLOR = "#1f77b4"   # 对比样 = 蓝
+
+
+def cmp_color(label: str, idx: int = 0) -> str:
+    """对比图里某样品该用什么颜色：按角色名判，判不出再按座位次序。"""
+    s = str(label or "")
+    if "实验" in s:
+        return EXP_COLOR
+    if "对比" in s:
+        return CTL_COLOR
+    return CMP_COLORS[idx % len(CMP_COLORS)]
 
 
 def chart_long_cycle(title: str, cells: list[dict],
@@ -661,7 +675,7 @@ def chart_long_cycle(title: str, cells: list[dict],
     ylab = "放电比容量 (mAh g⁻¹)" if use_sp else "容量 (mAh)"
     fig = CycleChart(title, ylab, "库仑效率 (%)")
     for i, cell in enumerate(cells):
-        color = CMP_COLORS[i % len(CMP_COLORS)]
+        color = cmp_color(cell.get("label", ""), i)
         lab = cell["label"]
         xs = [c["cycle"] for c in cell["cs"]]
         fig.add_left(xs, [c.get(kd) for c in cell["cs"]], f"{lab} 放电",
@@ -719,7 +733,7 @@ def chart_rate(title: str, cells: list[dict],
     fig = CycleChart(title, ylab, "", x_label="循环号")
     span_ys: list[float] = []
     for i, cell in enumerate(cells):
-        color = CMP_COLORS[i % len(CMP_COLORS)]
+        color = cmp_color(cell.get("label", ""), i)
         ys = [c.get(kd) for c in cell["cs"]]
         span_ys += [v for v in ys if v is not None]
         fig.add_left([c["cycle"] for c in cell["cs"]], ys,
@@ -832,7 +846,7 @@ def chart_vq(title: str, cells: list[dict]) -> CycleChart:
     """
     fig = CycleChart(title, "电压 (V)", "", x_label="容量 (mAh)")
     for i, cell in enumerate(cells):
-        color = CMP_COLORS[i % len(CMP_COLORS)]
+        color = cmp_color(cell.get("label", ""), i)
         cur = cell.get("curves") or {}
         ice = cur.get("ice")
         ice_txt = f"（ICE {ice:.2f}%）" if ice else ""
@@ -853,7 +867,7 @@ def chart_avgv(title: str, cells: list[dict]) -> CycleChart:
     """
     fig = CycleChart(title, "平均电压 (V)", "", x_label="循环号")
     for i, cell in enumerate(cells):
-        color = CMP_COLORS[i % len(CMP_COLORS)]
+        color = cmp_color(cell.get("label", ""), i)
         lab = cell["label"]
         fig.add_left([c["cycle"] for c in cell["cs"]],
                      [(c["chg_eng"] / c["chg"]) if c.get("chg") else None
@@ -920,7 +934,7 @@ def chart_dqdv(title: str, cells: list[dict],
     """
     fig = CycleChart(title, y_label, "", x_label="电压 (V)")
     for i, cell in enumerate(cells):
-        color = CMP_COLORS[i % len(CMP_COLORS)]
+        color = cmp_color(cell.get("label", ""), i)
         cycs = sorted(cell.get("curves", {}))
         if not cycs:
             continue
@@ -944,7 +958,7 @@ def chart_dqdv_branch(title: str, cells: list[dict], branch: str = "dis") -> Cyc
     br_name = "放电分支" if branch == "dis" else "充电分支"
     fig = CycleChart(title, "dQ/dV (mAh V⁻¹)", "", x_label="电压 (V)")
     for i, cell in enumerate(cells):
-        color = CMP_COLORS[i % len(CMP_COLORS)]
+        color = cmp_color(cell.get("label", ""), i)
         dq = cell.get("dqdv", {}).get(branch, [])
         if not dq:
             continue

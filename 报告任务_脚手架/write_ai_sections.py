@@ -117,7 +117,7 @@ def main() -> int:
     only = [x.strip() for x in args.only.split(",")] if args.only else None
 
     prompt = build_prompt(pkg, only)
-    print(f"提示词 {len(prompt)} 字，模型 {MODEL} @ {MODEL_BASE}，待写 {len(only or AI_BLOCKS)} 段")
+    print(f"  ✍ 本地大模型（{MODEL}）撰写 {len(only or AI_BLOCKS)} 段判断正文 · 提示词 {len(prompt)/10000:.1f} 万字")
     if args.dry_run:
         return 0
 
@@ -136,7 +136,7 @@ def main() -> int:
     got = {k: v for k, v in blocks.items() if k in (only or AI_BLOCKS)}
     batch = pkg / "批量稿.json"
     batch.write_text(json.dumps(got, ensure_ascii=False, indent=1), encoding="utf-8")
-    print(f"模型返回 {len(blocks)} 段，采信 {len(got)} 段 → 批量稿.json")
+    print(f"  ✓ 模型返回 {len(blocks)} 段，采信 {len(got)} 段")
 
     # 拆段 + 过闸；不合格就带原因回灌重写一次（只重写不合格的那几段）
     for attempt in (1, 2):
@@ -150,7 +150,7 @@ def main() -> int:
             print("⚠️ 仍有不合格段落（已尽力），报告会照常生成，请看上面的原因", file=sys.stderr)
             return 0
         repair = {bid: [msg.strip()] for bid, msg in bad}
-        print(f"→ 回灌重写不合格的 {len(repair)} 段：{'、'.join(repair)}")
+        print(f"  ↻ {len(repair)} 段未过自动校验 → 已自动回灌重写：{'、'.join(repair)}")
         try:
             out2 = call_model(build_prompt(pkg, list(repair), repair))
             got2 = {k: v for k, v in parse_blocks(out2).items() if k in repair}
