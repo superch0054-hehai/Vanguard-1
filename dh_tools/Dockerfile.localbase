@@ -1,0 +1,15 @@
+# 离线版配方：用盒子上"已有的镜像"做底——完全不需要下载
+# 用法（在盒子上，或先 scp 覆盖 ~/dh-lab/tools/Dockerfile 再跑一键脚本）：
+#   docker build -t dh-collect:0.1 ~/dh-lab/tools
+# 说明：底镜像就是盒子上跑大模型的那个（里面自带 Python），
+#       Docker 层是共享的，不会额外占用一份大镜像的空间。
+FROM harbor.iluvatar.com.cn:10443/saas/mr-bi150-4.4.0-x86-ubuntu20.04-py3.10-poc-vllm-omni:v1.1.1
+
+WORKDIR /app
+COPY parse_dh_txt.py parse_dhsln.py parse_dat.py dh_collect.py selftest_dh.py /app/
+
+# 自检不过就不启动（免得带着坏代码上班）
+RUN python3 selftest_dh.py
+
+ENTRYPOINT ["python3", "dh_collect.py"]
+CMD ["--inbox", "/inbox", "--outbox", "/outbox", "--interval", "30"]
