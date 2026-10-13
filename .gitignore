@@ -1,21 +1,30 @@
-# ===== 数据与素材（体积大，不入库）=====
-东华测试软件原数据/
-Vanguard-1/
-*.pdf
-*.zip
+# 数据与日志（绝不提交）
+data/
+logs/
+raw_dumps/*.bin
+*.pid
 
-# ===== 运行产物 / 临时 =====
+# 生成产物（可重算）
+probe_report.json
+_cli_test_report.json
+审查包_*/
+对账表_*.csv
+对账说明_*.md
+_*_out/
+_*_test*/
+
+# 报告任务的**生成物镜像**（脚手架是源，盒子上是运行现场；本地这份只是快照）
+报告任务/
+报告任务-正式数据集/
+
+# 环境与缓存
+.venv/
+venv/
 __pycache__/
-*.pyc
-dh_tools/out/
-dh_tools/demo/
-DH_export/
-*.log
+*.py[cod]
+.env
 
-# ===== 工具自身 / Windows 噪音 =====
-.zcodeignore
-*.bak
-Thumbs.db
-desktop.ini
+# 编辑器
 .vscode/
-~$*
+.idea/
+.DS_Store
