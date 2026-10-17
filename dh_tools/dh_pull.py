@@ -39,6 +39,7 @@ from datetime import datetime
 from pathlib import Path
 
 EXTS = (".dat", ".dhsln")
+KEY_PATH = os.path.expanduser(os.environ.get("DH_PC_KEY", "~/.ssh/id_rsa_pc"))
 VALVE = 0.2          # 消失比例安全阀
 
 
@@ -57,9 +58,9 @@ def list_remote(pc, src, timeout=90):
     )
     try:
         out = subprocess.run(
-            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", pc,
-             "powershell", "-NoProfile", "-Command", ps],
-            capture_output=True, text=True, timeout=timeout)
+            ["ssh", "-i", KEY_PATH, "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=15", pc,
+             'powershell -NoProfile -Command "[Console]::OutputEncoding=[Text.Encoding]::UTF8; ' + ps + '"'],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     except Exception as exc:
         log("ssh 列目录异常：%s" % exc)
         return None
@@ -95,7 +96,7 @@ def pull_one(pc, src, rel, dest):
     dest.parent.mkdir(parents=True, exist_ok=True)
     try:
         out = subprocess.run(
-            ["scp", "-p", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15",
+            ["scp", "-p", "-i", KEY_PATH, "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=15",
              "%s:%s" % (pc, remote_full), str(dest)],
             capture_output=True, text=True, timeout=300)
         return out.returncode == 0
