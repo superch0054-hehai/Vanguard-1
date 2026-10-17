@@ -1,0 +1,2 @@
+# 盒子（admin 用户）的定时任务：每分钟拉取一次（无需 sudo）
+* * * * * cd /home/admin/dh-lab/tools && /usr/bin/python3 dh_pull.py --pc dhbox@10.201.25.154 --src "D:\测试数据\HK" --once >> /home/admin/dh-lab/_state/dh_pull.log 2>&1
