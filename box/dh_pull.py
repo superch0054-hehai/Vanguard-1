@@ -90,16 +90,30 @@ def list_remote(pc, src, timeout=90):
     return out_map
 
 
-def pull_one(pc, src, rel, dest):
+def pull_one(pc, src, rel, dest, expect=None):
     """scp 拉取单个文件（Windows OpenSSH 的路径写法：/D:/...）"""
     remote_full = "/" + src.replace("\\", "/").rstrip("/") + "/" + rel
     dest.parent.mkdir(parents=True, exist_ok=True)
     try:
         out = subprocess.run(
-            ["scp", "-p", "-i", KEY_PATH, "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=15",
+            ["scp", "-O", "-p", "-i", KEY_PATH, "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=15",
              "%s:%s" % (pc, remote_full), str(dest)],
             capture_output=True, text=True, timeout=300)
-        return out.returncode == 0
+        if out.returncode != 0:
+            return False
+        if expect is not None:
+            try:
+                real = dest.stat().st_size
+            except Exception:
+                return False
+            if real != expect:
+                try:
+                    dest.unlink()
+                except Exception:
+                    pass
+                log("大小不符（%s）：期望 %d，实际 %d → 已删除，下趟重拉" % (rel, expect, real))
+                return False
+        return True
     except Exception as exc:
         log("scp 异常（%s）：%s" % (rel, exc))
         return False
@@ -140,7 +154,7 @@ def scan_once(pc, src, inbox, state, min_age=30):
             continue                                    # 太新，可能还在写
         if prev_sizes.get(key) != size:
             continue                                    # 大小与上一趟不同 → 再等一趟（写稳才拉）
-        if pull_one(pc, src, rel, inbox / rel):
+        if pull_one(pc, src, rel, inbox / rel, size):
             manifest[key] = t
             n_new += 1
             log("已拉取：%s（%d 字节）" % (rel, size))
